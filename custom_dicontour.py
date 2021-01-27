@@ -49,7 +49,7 @@ def coord2pixels(contour_dataset, path):
     contour_coord = contour_dataset.ContourData
     coord = []
     for i in range(0, len(contour_coord), 3):
-        coord.append((contour_coord[i], contour_coord[i + 1], contour_coord[i + 2]))
+        coord.append((float(contour_coord[i]), float(contour_coord[i + 1])))
 
     # extract the image id corresponding to given countour
     # read that dicom file
@@ -60,15 +60,15 @@ def coord2pixels(contour_dataset, path):
     x_spacing, y_spacing = float(img.PixelSpacing[0]), float(img.PixelSpacing[1])
 
     # this is the center of the upper left voxel
-    origin_x, origin_y, _ = img.ImagePositionPatient
+    origin_x, origin_y = float(img.ImagePositionPatient[0]), float(img.ImagePositionPatient[1])
 
     # y, x is how it's mapped
-    pixel_coords = [(np.ceil((x - origin_x) / x_spacing), np.ceil((y - origin_y) / y_spacing)) for x, y, _ in coord]
+    pixel_coords = set([(int((x - origin_x) / x_spacing), int((y - origin_y) / y_spacing)) for x, y in coord])
 
     return pixel_coords, img_id
 
 
-def slice_order(path):
+def frame_order(path):
     """
     Takes path of directory that has the DICOM images and returns
     a ordered list that has ordered filenames
@@ -84,12 +84,13 @@ def slice_order(path):
         if f.Modality != 'RTSTRUCT':
             slices.append(f)
 
+    # arrange frames by position in scan
     slice_dict = {s.SOPInstanceUID: s.ImagePositionPatient[-1] for s in slices}
     ordered_slices = sorted(slice_dict.items(), key=operator.itemgetter(1))
     return ordered_slices
 
 
-def get_contour_dict(contour_file, path, index):
+def get_contours_dict(contour_file, path):
     """
     Returns a dictionary as k: img fname, v: [corresponding img_arr, corresponding contour_arr]
     Inputs:
@@ -99,19 +100,26 @@ def get_contour_dict(contour_file, path, index):
         contour_dict: dictionary with 2d np.arrays
     """
     f = dicom.read_file(os.path.join(path, contour_file))
-    roi = f.ROIContourSequence[index]
 
-    # get contour datasets in a list
-    contours = [contour for contour in roi.ContourSequence]
-    img_contour_arrays = [coord2pixels(cdata, path) for cdata in contours]  # list of img_arr, contour_arr, im_id
+    # get roi names
+    roi_list = [x.ROIName for x in f.StructureSetROISequence]
 
-    # debug: there are multiple contours for the same image independently
-    # append contour arrays and generate new img_contour_arrays
-    contour_dict = defaultdict(list)
-    for cntr_arr, im_id in img_contour_arrays:
-        contour_dict[im_id].append(cntr_arr)
+    # get contours by image id for each roi
+    contours_dict = {}
+    for index, roi in enumerate(f.ROIContourSequence):
+        # get contour datasets in a list
+        contours = [contour for contour in roi.ContourSequence]
+        # get list of (contour_arr, im_id)
+        img_contour_arrays = [coord2pixels(cdata, path) for cdata in contours]
 
-    return contour_dict
+        # dict {image id:list of contours} for each roi
+        roi_dict = defaultdict(list)
+        for cntr_set, im_id in img_contour_arrays:
+            roi_dict[im_id].append(cntr_set)
+
+        contours_dict[roi_list[index]] = roi_dict
+
+    return contours_dict
 
 
 def get_data(path):
@@ -122,44 +130,41 @@ def get_data(path):
         contour_dict (dict): dictionary created by get_contour_dict
         index (int): index of the
     """
-    images = []
 
     # get contour file
     contour_path, contour_file = get_contour_file(path)
     # get slice orders
-    ordered_slices = slice_order(path)
+    ordered_frames = frame_order(path)
 
-    patient_id, modality, position = None, None, None
-
-    # get image array
-    for i, (k, v) in enumerate(ordered_slices):
+    # build array of images and get metadata
+    images, patient_id, modality, position = [], None, None, None
+    for i, (k, v) in enumerate(ordered_frames):
         dcm = dicom.read_file(os.path.join(path, k + '.dcm'))
-        img_arr = parse_dicom_image(dcm)
-        images.append(img_arr)
         if i == 0:
             patient_id = dcm.PatientID
             modality = dcm.Modality
             position = dcm.PatientPosition
 
+        # get image array
+        img_arr = parse_dicom_image(dcm)
+        images.append(img_arr)
     assert None not in [patient_id, modality, position]
 
-    # get roi names
-    roi_list = [x.ROIName for x in dicom.read_file(contour_path).StructureSetROISequence]
+    data_dict = {'patientid': patient_id, 'modality': modality, 'position': position,
+                 'contours': {}, 'ordered_uids': [uid for uid, pos in ordered_frames]}
 
-    # get contour dict
-    contour_dict = {}
-    for index, roi in enumerate(roi_list):
-        contour_dict[roi] = get_contour_dict(contour_file, path, index)
+    # get contours for each roi
+    roi_contours = get_contours_dict(contour_file, path)
 
-    contours = {'patientID': patient_id, 'modality': modality, 'position': position}
-    for roi, cdict in contour_dict.items():
-        contours[roi] = []
-        for index, (k, v) in enumerate(ordered_slices):
-            # get data from contour dict
+    # assign roi contours to frames
+    for roi, cdict in roi_contours.items():
+        data_dict['contours'][roi] = []
+        for index, (k, v) in enumerate(ordered_frames):
+            # load contour for this roi for this frame
             if k in cdict:
-                contours[roi].append(cdict[k])
-            # get data from dicom.read_file
+                data_dict['contours'][roi].append(cdict[k])
+            # no contour for this roi for this frame
             else:
-                contours[roi].append([])
+                data_dict['contours'][roi].append([])
 
-    return patient_id, modality, np.array(images), contours
+    return images, data_dict

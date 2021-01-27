@@ -18,7 +18,6 @@ for dirs in tqdm.tqdm(os.listdir(root1)):
 
         for roi in data_dict['contours'].values():
             assert len(roi) == np.shape(images)[0]
-        print(data_dict['contours']['Bladder'])
 
         assert np.shape(images)[1:] in [(512, 512), (192, 192)]
         new_dir = os.path.join(root2, dirs, scandir)

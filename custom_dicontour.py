@@ -1,3 +1,4 @@
+"""Original code taken from https://github.com/KeremTurgutlu/dicom-contour"""
 from contour_utils import *
 from collections import defaultdict
 import os
@@ -15,6 +16,7 @@ def get_contour_file(path):
     Inputs:
             path (str): path of the the directory that has DICOM files in it, e.g. folder of a single patient
     Return:
+        contour_path (str): path of the file with the contour
         contour_file (str): name of the file with the contour
     """
     # get .dcm contour file
@@ -37,13 +39,13 @@ def get_contour_file(path):
 def coord2pixels(contour_dataset, path):
     """
     Given a contour dataset (a DICOM class) and path that has .dcm files of
-    corresponding images. This function will return img_arr and contour_arr (2d image and contour pixels)
+    corresponding images return polygon coordinates for the contours.
     Inputs
         contour_dataset: DICOM dataset class that is identified as (3006, 0016)  Contour Image Sequence
         path: string that tells the path of all DICOM images
     Return
-        img_arr: 2d np.array of image with pixel intensities
-        contour_arr: 2d np.array of contour with 0 and 1 labels
+        pixel_coords (list): list of tuples having pixel coordinates
+        img_ID (id): DICOM image id which maps input contour dataset
     """
 
     contour_coord = contour_dataset.ContourData
@@ -51,7 +53,7 @@ def coord2pixels(contour_dataset, path):
     for i in range(0, len(contour_coord), 3):
         coord.append((float(contour_coord[i]), float(contour_coord[i + 1])))
 
-    # extract the image id corresponding to given countour
+    # extract the image id corresponding to given contour
     # read that dicom file
     img_id = contour_dataset.ContourImageSequence[0].ReferencedSOPInstanceUID
     img = dicom.read_file(os.path.join(path, img_id + '.dcm'))
@@ -63,7 +65,7 @@ def coord2pixels(contour_dataset, path):
     origin_x, origin_y = float(img.ImagePositionPatient[0]), float(img.ImagePositionPatient[1])
 
     # y, x is how it's mapped
-    pixel_coords = set([(int((x - origin_x) / x_spacing), int((y - origin_y) / y_spacing)) for x, y in coord])
+    pixel_coords = list(set([(int((x - origin_x) / x_spacing), int((y - origin_y) / y_spacing)) for x, y in coord]))
 
     return pixel_coords, img_id
 
@@ -127,8 +129,6 @@ def get_data(path):
     Generate image array and contour array
     Inputs:
         path (str): path of the the directory that has DICOM files in it
-        contour_dict (dict): dictionary created by get_contour_dict
-        index (int): index of the
     """
 
     # get contour file

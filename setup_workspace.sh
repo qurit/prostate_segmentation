@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# setup script for setting up workspace on a linux machine
+# NOTE: install detectron2 step does not work for mac, follow steps in link below
+# https://detectron2.readthedocs.io/en/latest/tutorials/install.html#build-detectron2-from-source
+
 git config --local core.hooksPath .githooks/
 
 read -p "Download and init miniconda? (y/n)?: " input

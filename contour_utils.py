@@ -1,3 +1,4 @@
+"""Original code taken from https://github.com/KeremTurgutlu/dicom-contour"""
 import os
 import pydicom as dicom
 import numpy as np
@@ -81,7 +82,7 @@ def coords2poly(contour_dataset, path):
     # extract the image id corresponding to given countour
     # read that dicom file
     img_id = contour_dataset.ContourImageSequence[0].ReferencedSOPInstanceUID
-    img = dicom.read_file(path + img_ID + '.dcm')
+    img = dicom.read_file(path + img_id + '.dcm')
     img_arr = img.pixel_array
     img_shape = img_arr.shape
 

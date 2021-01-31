@@ -2,6 +2,7 @@
 from contour_utils import *
 from collections import defaultdict
 import os
+import math
 import operator
 import warnings
 
@@ -49,9 +50,21 @@ def coord2pixels(contour_dataset, path):
     """
 
     contour_coord = contour_dataset.ContourData
+    x0 = contour_coord[len(contour_coord)-3]
+    y0 = contour_coord[len(contour_coord)-2]
+    z0 = contour_coord[len(contour_coord)-1]
     coord = []
     for i in range(0, len(contour_coord), 3):
-        coord.append((float(contour_coord[i]), float(contour_coord[i + 1])))
+        x = contour_coord[i]
+        y = contour_coord[i+1]
+        z = contour_coord[i+2]
+        l = math.sqrt((x-x0)*(x-x0) + (y-y0)*(y-y0) + (z-z0)*(z-z0))
+        l = math.ceil(l*2)+1
+        for j in range(1, l+1):
+          coord.append([(x-x0)*j/l+x0, (y-y0)*j/l+y0, (z-z0)*j/l+z0])
+        x0 = x
+        y0 = y
+        z0 = z
 
     # extract the image id corresponding to given contour
     # read that dicom file
@@ -65,7 +78,7 @@ def coord2pixels(contour_dataset, path):
     origin_x, origin_y = float(img.ImagePositionPatient[0]), float(img.ImagePositionPatient[1])
 
     # y, x is how it's mapped
-    pixel_coords = list(set([(int((x - origin_x) / x_spacing), int((y - origin_y) / y_spacing)) for x, y in coord]))
+    pixel_coords = list(set([(int((x - origin_x) / x_spacing), int((y - origin_y) / y_spacing)) for x, y, _ in coord]))
 
     return pixel_coords, img_id
 

@@ -61,7 +61,7 @@ def coord2pixels(contour_dataset, path):
         l = math.sqrt((x-x0)*(x-x0) + (y-y0)*(y-y0) + (z-z0)*(z-z0))
         l = math.ceil(l*2)+1
         for j in range(1, l+1):
-          coord.append([(x-x0)*j/l+x0, (y-y0)*j/l+y0, (z-z0)*j/l+z0])
+          coord.append([(x-x0)*j/l+x0, (y-y0)*j/l+y0])
         x0 = x
         y0 = y
         z0 = z
@@ -78,7 +78,7 @@ def coord2pixels(contour_dataset, path):
     origin_x, origin_y = float(img.ImagePositionPatient[0]), float(img.ImagePositionPatient[1])
 
     # y, x is how it's mapped
-    pixel_coords = list(set([(int((x - origin_x) / x_spacing), int((y - origin_y) / y_spacing)) for x, y, _ in coord]))
+    pixel_coords = list(set([(int((x - origin_x) / x_spacing), int((y - origin_y) / y_spacing)) for x, y in coord]))
 
     return pixel_coords, img_id
 

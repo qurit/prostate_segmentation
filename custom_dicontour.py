@@ -150,17 +150,15 @@ def get_data(path):
     ordered_frames = frame_order(path)
 
     # build array of images and get metadata
-    images, patient_id, modality, position = [], None, None, None
+    dcm_paths, patient_id, modality, position = [], None, None, None
     for i, (k, v) in enumerate(ordered_frames):
-        dcm = dicom.read_file(os.path.join(path, k + '.dcm'))
+        dcm_path = os.path.join(path, k + '.dcm')
         if i == 0:
+            dcm = dicom.read_file(dcm_path)
             patient_id = dcm.PatientID
             modality = dcm.Modality
             position = dcm.PatientPosition
-
-        # get image array
-        img_arr = parse_dicom_image(dcm)
-        images.append(img_arr)
+        dcm_paths.append(dcm_path)
     assert None not in [patient_id, modality, position]
 
     data_dict = {'patientid': patient_id, 'modality': modality, 'position': position,
@@ -180,4 +178,4 @@ def get_data(path):
             else:
                 data_dict['contours'][roi].append([])
 
-    return images, data_dict
+    return dcm_paths, data_dict

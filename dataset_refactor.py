@@ -1,5 +1,4 @@
 from custom_dicontour import *
-import matplotlib.pyplot as plt
 import tqdm
 import json
 
@@ -16,12 +15,11 @@ for dirs in tqdm.tqdm(os.listdir(root1)):
             continue
 
         # get image and data dict for a particular patient + scan
-        images, data_dict = get_data(path)
+        dcm_paths, data_dict = get_data(path)
 
         # sanity checks
         for roi in data_dict['contours'].values():
-            assert len(roi) == np.shape(images)[0]
-        assert np.shape(images)[1:] in [(512, 512), (192, 192)]
+            assert len(roi) == len(dcm_paths)
 
         patient_id = data_dict['patientid']
         modality = data_dict['modality']
@@ -34,9 +32,9 @@ for dirs in tqdm.tqdm(os.listdir(root1)):
         with open(os.path.join(new_dir, 'contour_dict.json'), 'w', encoding='utf-8') as f:
             json.dump(data_dict, f, ensure_ascii=False, indent=4)
 
-        for i in range(np.shape(images)[0]):
-            impath = os.path.join(new_dir, str(i)+'.jpeg')
-            plt.imsave(impath, images[i], cmap='gray')
+        for i in range(len(dcm_paths)):
+            impath = os.path.join(new_dir, str(i)+'.dcm')
+            os.rename(dcm_paths[i], impath)
 
         if patient_id in global_dict:
             patient_dict = global_dict[patient_id]

@@ -1,11 +1,13 @@
 from custom_dicontour import *
 import tqdm
 import json
+from shutil import copyfile
 
 root1 = '../Data'  # raw dicom PET-CT data
 root2 = 'image_dataset/'  # name of new processed dataset
 banned_dir = '../Data/1.2.840.113654.2.70.1.248345942932064946017433599830459061029/' \
              '1.2.840.113654.2.70.1.285864328441314159531538468048958165023'
+copy_dicoms = False  # option to copy over dicoms into new directory instead of just renaming
 
 global_dict = {}
 for dirs in tqdm.tqdm(os.listdir(root1)):
@@ -34,7 +36,10 @@ for dirs in tqdm.tqdm(os.listdir(root1)):
 
         for i in range(len(dcm_paths)):
             impath = os.path.join(new_dir, str(i)+'.dcm')
-            os.rename(dcm_paths[i], impath)
+            if copy_dicoms:
+                copyfile(dcm_paths[i], impath)
+            else:
+                os.rename(dcm_paths[i], impath)
 
         if patient_id in global_dict:
             patient_dict = global_dict[patient_id]

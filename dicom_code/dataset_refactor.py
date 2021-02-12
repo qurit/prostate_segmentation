@@ -2,9 +2,10 @@ from custom_dicontour import *
 import tqdm
 import json
 
-root1 = '../Data'  # raw dicom PET-CT data
-root2 = 'image_dataset/'  # name of new processed dataset
-banned_dir = '../Data/1.2.840.113654.2.70.1.248345942932064946017433599830459061029/' \
+root1 = '/home/yous/Desktop/ryt/dicom_dataset_v0/Data/'  # raw dicom PET-CT data
+root2 = '/home/yous/Desktop/ryt/image_dataset/'  # name of new processed dataset
+banned_dir = '/home/yous/Desktop/ryt/dicom_dataset_v0/Data/' \
+             '1.2.840.113654.2.70.1.248345942932064946017433599830459061029/' \
              '1.2.840.113654.2.70.1.285864328441314159531538468048958165023'
 
 global_dict = {}

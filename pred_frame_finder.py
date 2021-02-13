@@ -1,9 +1,12 @@
+import os
 import json
 import tqdm
-import pydicom
-from utils import *
+import numpy as np
+import pydicom as dicom
+
+from utils import centre_crop
 from scipy.signal import savgol_filter
-from dataset_building.contour_utils import *
+from dicom_code.contour_utils import parse_dicom_image
 
 
 root = '/home/yous/Desktop/ryt/'
@@ -24,7 +27,7 @@ for patient in tqdm.tqdm(list(data_dict.keys())):
 
     for frame in range(*bladder_range):
 
-        img_dcm = pydicom.dcmread(os.path.join(root, scan['fp'], str(frame)+'.dcm'))
+        img_dcm = dicom.dcmread(os.path.join(root, scan['fp'], str(frame)+'.dcm'))
         orig_img = parse_dicom_image(img_dcm)
 
         crop_size = (int(0.15 * orig_img.shape[0]), int(0.15 * orig_img.shape[1]))

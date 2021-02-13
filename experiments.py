@@ -1,9 +1,15 @@
 import json
 import tqdm
+import scipy
+import os
+import numpy as np
+import pydicom as dicom
+
+import skimage.filters
+import skimage.segmentation
 from skimage import feature
-from bladder_find import *
 from utils import contour2mask, centre_crop, dice_score
-from dataset_building.contour_utils import parse_dicom_image
+from dicom_code.contour_utils import parse_dicom_image
 
 root = '/home/yous/Desktop/ryt/'
 sobel_global, canny_global, all_frames = [], [], []
@@ -23,7 +29,7 @@ for patient in tqdm.tqdm(data_dict.keys()):
     pat_sob_dcs, pat_can_dcs = [], []
 
     for frame in range(*bladder_frames):
-        img_dcm = pydicom.dcmread(os.path.join(root, scan['fp'], str(frame)+'.dcm'))
+        img_dcm = dicom.dcmread(os.path.join(root, scan['fp'], str(frame)+'.dcm'))
         orig_img = parse_dicom_image(img_dcm)
         img = centre_crop(orig_img, (100, 100))
 

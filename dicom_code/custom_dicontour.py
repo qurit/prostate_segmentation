@@ -1,10 +1,10 @@
 """Original code taken from https://github.com/KeremTurgutlu/dicom-contour"""
-from contour_utils import *
-from collections import defaultdict
 import os
 import math
 import operator
 import warnings
+import pydicom as dicom
+from collections import defaultdict
 
 
 def get_contour_file(path):

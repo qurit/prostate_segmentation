@@ -58,8 +58,10 @@ def canny_mask(img, alg_name="Canny"):
     return alg_name, mask
 
 
-def march_squares_mask(img, alg_name="Marching Squares"):
-    contours = measure.find_contours(img, level=20000)
+def march_squares_mask(img, alg_name="Marching-Squares"):
+    level = 15000
+    contours = measure.find_contours(img, level=level)  # TODO: try mask param in find_contours
+    # print(level/np.mean(img))
 
     if len(contours) == 0:
         mask = np.zeros(img.shape, int)
@@ -73,6 +75,30 @@ def march_squares_mask(img, alg_name="Marching Squares"):
         # convert to mask
         mask = contour2mask(contours, img.shape, xy_ordering=False)
 
+    _, canny = canny_mask(img)
+    if mask.sum() < 5:
+        mask = canny
+
+    return alg_name, mask
+
+
+def ensemble_mean(img, alg_name="Ensemble-Mean"):
+    _, canny = canny_mask(img)
+    _, sobel = sobel_mask(img)
+    _, march = march_squares_mask(img)
+    mask = (canny.astype(int) + sobel.astype(int) + march.astype(int)) / 3
+    mask = np.round(mask).astype(int)
+
+    return alg_name, mask
+
+
+def ensemble_union(img, alg_name="Ensemble-Union"):
+    _, canny = canny_mask(img)
+    _, sobel = sobel_mask(img)
+    _, march = march_squares_mask(img)
+    mask = (canny.astype(int) + sobel.astype(int) + march.astype(int))
+    mask[mask > 1] = 1
+
     return alg_name, mask
 
 
@@ -83,12 +109,15 @@ def dummy_mask(img, alg_name="Dummy"):
 # add more edge detection algorithms here
 
 
-def mask_predictions(*algorithms, show_mask=False):
+def mask_predictions(*algorithms, show_mask=False, show_hist=False):
     with open(os.path.join(DATA_DIR, 'image_dataset/global_dict.json')) as f:
         data_dict = json.load(f)
 
     # initialize dict to store dice score results
     global_dice_dict = {}
+
+    # initialize dict to store skipped frames
+    skipped_frames = {}
 
     for patient in tqdm.tqdm(data_dict.keys()):
         scan = data_dict[patient]['PT']
@@ -106,20 +135,34 @@ def mask_predictions(*algorithms, show_mask=False):
             # load dicom file
             img_dcm = dicom.dcmread(os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm'))
             orig_img = parse_dicom_image(img_dcm)
+            orig_img_size = np.shape(orig_img)
+
+            # get ground truth mask
+            ground_truth = contour2mask(bladder[frame], orig_img_size)
+
+            # skip frame if ground truth mask smaller than small threshold
+            skip_threshold = 0
+            if np.sum(ground_truth) < skip_threshold:
+                if patient not in skipped_frames.keys():
+                    skipped_frames[patient] = [i]
+                else:
+                    skipped_frames[patient].append(i)
+                continue
 
             # reduces computation
-            img = centre_crop(np.copy(orig_img), (100, 100))  # pass in a copied image object, otherwise orig_img gets modified
+            crop_size = 100
+            img = centre_crop(np.copy(orig_img), (crop_size, crop_size))  # pass in a copied image object, otherwise orig_img gets modified
 
             # apply initial thresholding
             img[img < 5000] = 0.
 
-            # get ground truth mask
-            ground_truth = contour2mask(bladder[frame], orig_img.shape)
-
-            for alg in algorithms:
-                alg_name, curr_mask = alg(img)
+            for alg_name in algorithms:
+                alg_name, curr_mask = alg_name(img)
                 full_mask = np.zeros_like(orig_img)
-                full_mask[46:146, 46:146] = curr_mask
+                # find range of indices of center crop on original image
+                b = int(orig_img_size[0]/2 + crop_size/2)
+                a = b - crop_size
+                full_mask[a:b, a:b] = curr_mask
 
                 dice = 0. if full_mask.sum() == 0 else dice_score(ground_truth, full_mask)
 
@@ -157,24 +200,60 @@ def mask_predictions(*algorithms, show_mask=False):
                     axs[a, b].set_yticks([])
 
                 fig.suptitle("Patient ID: %s" % patient)
-                # plt.subplots_adjust(top=0.85)  # TODO: add spacing between sup title and subplots
-                plt.show()
-                plt.close('all')
+                # adjust spacing
+                plt.tight_layout()
+                plt.subplots_adjust(top=0.90)
+
+                # save fig to disk
+                mask_dir = os.path.join(DATA_DIR, "mask_predictions")
+                if not os.path.isdir(mask_dir):
+                    os.makedirs(mask_dir)
+                fig.savefig(os.path.join(mask_dir, patient + "-" + str(i) + ".png"), format="png")
+                plt.close(fig)
+
+                # plt.show()
+                # plt.close('all')
 
         # add to global dice dict
-        for alg in patient_pred_dict.keys():
+        for alg_name in patient_pred_dict.keys():
             # compute average dice across scan
-            if alg not in global_dice_dict.keys():
-                global_dice_dict[alg] = [np.mean(patient_pred_dict[alg]["dice"])]
+            if alg_name not in global_dice_dict.keys():
+                global_dice_dict[alg_name] = [np.mean(patient_pred_dict[alg_name]["dice"])]
             else:
-                global_dice_dict[alg].append(np.mean(patient_pred_dict[alg]["dice"]))
+                global_dice_dict[alg_name].append(np.mean(patient_pred_dict[alg_name]["dice"]))
+
+    # compute + print skipped frame stats
+    flatten = lambda t: [item for sublist in t for item in sublist]
+    all_skipped = flatten([*skipped_frames.values()])
+    average_skipped = [len(val) for val in skipped_frames.values()]
+    print("Skipped %.0f frames when sum(ground_truth) < %.0f" % (len(all_skipped), skip_threshold))
+    print("Average frames skipped per patient %.2f" % (sum(average_skipped)/len(data_dict.keys())))
+    print("Skipped frames object\n", skipped_frames, "\n")
 
     # compute average scores across patients
-    for alg in global_dice_dict.keys():
-        avg = np.mean(global_dice_dict[alg])
-        print("{} dice score: {}".format(alg, avg))
+    for alg_name in global_dice_dict.keys():
+        avg = np.mean(global_dice_dict[alg_name])
+        print("{} dice score: {}".format(alg_name, avg))
+
+    # plots histograms of the dice scores for each algorithm
+    if show_hist:
+        fig, axs = plt.subplots(len(global_dice_dict.keys()), figsize=(6, 9), sharex=True)
+        for idx, alg_name in enumerate(global_dice_dict.keys()):
+            axs[idx].hist(global_dice_dict[alg_name])
+            axs[idx].set_title("%s Mean Dice Score %.04f" % (alg_name, float(np.mean(global_dice_dict[alg_name]))))
+
+        plt.suptitle("Histogram of Dice Scores")
+        # adjust spacing
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.90)
+        plt.show()
+        plt.close('all')
 
 
 if __name__ == '__main__':
     # add arbitrary number of edge detection algorithms in the args
-    mask_predictions(sobel_mask, canny_mask, march_squares_mask, dummy_mask, show_mask=False)
+    mask_predictions(canny_mask,
+                     sobel_mask,
+                     march_squares_mask,
+                     ensemble_mean,
+                     ensemble_union, show_mask=False, show_hist=False)

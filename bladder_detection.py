@@ -84,7 +84,7 @@ class MarchSquaresMask:
             # convert to array of ints
             contours = np.rint(contours).astype(int)
             # convert to mask
-            mask = contour2mask(contours, img.shape, xy_ordering=False)  # TODO: why just an outline?? want to fill in hole
+            mask = contour2mask(contours, img.shape, xy_ordering=False)  # TODO: check if not just an outline
 
         return mask
 
@@ -138,8 +138,9 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
         slice_axes = ["z"]
     check_axes = [a for a in slice_axes if a in ['x', 'y', 'z']]
     assert (len(check_axes) == len(slice_axes))
+    axis_label_map = {"z": ["x", "y"], "y": ["x", "z"], "x": ["z", "y"]}
 
-    with open(os.path.join(DATA_DIR, 'test_dataset/global_dict.json')) as f:
+    with open(os.path.join(DATA_DIR, 'image_dataset/global_dict.json')) as f:
         data_dict = json.load(f)
 
     # dir where figs are saved
@@ -192,7 +193,7 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
         # for each specified slice axis, run edge detection
         for curr_axis in slice_axes:
             if curr_axis == 'z':
-                # set principle axis to z - trivial case no need to transform 3d image or ground truth mask
+                # set depth axis to z - trivial case no need to transform 3d image or ground truth mask
                 trans_img = np.copy(orig_img_3d)
                 trans_gt = np.copy(ground_truth_3d)
 
@@ -205,7 +206,7 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 img[img < 5000] = 0.
 
             elif curr_axis == 'y':
-                # set principle axis to y - swap y and z
+                # set depth axis to y - swap y and z
                 trans_img = np.swapaxes(orig_img_3d, 1, 0)
                 trans_gt = np.swapaxes(ground_truth_3d, 1, 0)
 
@@ -214,22 +215,19 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 img[img < 5000] = 0.  # TODO: find right value
 
             else:
-                # TODO: find which direction this is anatomically
-                # set principle axis to x - swap x and z
+                # set depth axis to x - swap x and z
                 trans_img = np.swapaxes(orig_img_3d, 2, 0)
                 trans_gt = np.swapaxes(ground_truth_3d, 2, 0)
 
                 crop_size = (100, z_size)
-                img = centre_crop(np.copy(trans_img), (x_size, *crop_size))  # TODO: still use 100x100 center crop
+                img = centre_crop(np.copy(trans_img), (x_size, *crop_size))  # TODO: use 100x100 center crop
                 img[img < 5000] = 0.
 
             trans_img_size = np.shape(trans_img)
             # iterate over each algorithm and compute the 3d mask
             for alg_fn in algorithms:
-                alg_name = alg_fn.__name__
+                alg_name = alg_fn().name
                 curr_mask_3d = [alg_fn.compute_mask(i) for i in img]
-                # plt.imshow(curr_mask_3d[90])
-                # plt.show()
 
                 full_mask_3d = np.zeros_like(trans_img)
                 # find range of indices of center crop on full image size
@@ -243,8 +241,6 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 # compute dice score for the whole volume
                 dice = 0. if full_mask_3d.sum() == 0 else dice_score(trans_gt, full_mask_3d)
 
-                # print(alg_name, dice)
-
                 # add to results dict
                 to_save = {"dice": dice, "mask": full_mask_3d}
                 if alg_name not in patient_pred_dict.keys():
@@ -252,24 +248,23 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 else:
                     patient_pred_dict[alg_name][curr_axis] = to_save
 
-            # TODO if show mask
-            # - make new dir for ax
-            # - save out 3d pred mask and gt
-            # - save out each frame and find the dice score
             if show_mask:
                 # TODO plot 3d gt and pred mask
-
                 size = len(patient_pred_dict.keys()) + 2
-
+                empty_mask_frames = [i for i, mask in enumerate(trans_gt) if mask.sum() == 0]
+                fig_num = 0
+                x_label, y_label = axis_label_map[curr_axis]
                 # iterate through each slice
-                # TODO: only save out slices that contain bladder
                 for i, (slice_2d, gt_2d) in enumerate(zip(trans_img, trans_gt)):
+                    # skip slices that contain no bladder
+                    if i in empty_mask_frames:
+                        continue
 
                     fig, axs = plt.subplots(int(np.ceil(size / 2)), 2, figsize=(10, 10))
                     axs[0, 0].imshow(slice_2d)
                     axs[0, 0].set_title('Original')
-                    axs[0, 0].set_xticks([])
-                    axs[0, 0].set_yticks([])
+                    axs[0, 0].set_xlabel(x_label)
+                    axs[0, 0].set_ylabel(y_label)
                     axs[0, 1].imshow(gt_2d, cmap='Dark2', interpolation='none', alpha=0.7)
                     axs[0, 1].set_title('Ground Truth Mask')
                     axs[0, 1].set_xticks([])
@@ -289,15 +284,16 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                         axs[a, b].set_xticks([])
                         axs[a, b].set_yticks([])
 
-                    fig.suptitle("Patient ID: %s\nPrinciple axis: %s" % (patient, curr_axis))
+                    fig.suptitle("Patient ID: %s\nDepth axis: %s" % (patient, curr_axis))
                     # adjust spacing
                     plt.tight_layout()
                     plt.subplots_adjust(top=0.90)
 
                     if save_figs:
                         # save fig to disk
-                        fig.savefig(os.path.join(mask_dir, curr_axis, patient + "-" + str(i) + ".png"), format="png")
+                        fig.savefig(os.path.join(mask_dir, curr_axis, patient + "-" + str(fig_num) + ".png"), format="png")
                         plt.close(fig)
+                        fig_num += 1
 
                     else:
                         plt.show()
@@ -313,7 +309,47 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 else:
                     results_dict['algos'][key_name]['dice'].append(a[axis]['dice'])
 
-        # TODO: do multi-view ensembling here, then save to results_dict
+        if len(slice_axes) > 1:
+            best_alg = patient_pred_dict["Ensemble-Mean"]  # assumes this is the best alg
+            masks = []
+            # revert all masks back to the standard (z, y, x) shape i.e. z is the depth axis
+            for axis in slice_axes:
+                if axis == "z":
+                    # trivial case
+                    masks.append(best_alg[axis]['mask'])
+                elif axis == "y":
+                    # swap z and y
+                    masks.append(np.swapaxes(best_alg[axis]['mask'], 1, 0))
+                else:
+                    # swap z and x
+                    masks.append(np.swapaxes(best_alg[axis]['mask'], 2, 0))
+
+            assert(len(np.shape(masks)) == 4)  # make sure this is a 4d array
+
+            # do ensemble mean across views
+            mv_mean_alg_name = "Mean MultiView-" + "".join(slice_axes)
+            mv_mean_mask = (sum([m.astype(int) for m in masks]) + 0.00001) / len(masks)
+            mv_mean_mask = np.round(mv_mean_mask).astype(int)
+
+            # compute dice score for whole volume
+            mv_mean_dice = 0. if mv_mean_mask.sum() == 0 else dice_score(ground_truth_3d, mv_mean_mask)
+
+            # do ensemble union across views
+            mv_union_alg_name = "Union MultiView-" + "".join(slice_axes)
+            mv_union_mask = sum([m.astype(int) for m in masks])
+            mv_union_mask[mv_union_mask > 1] = 1
+
+            # compute dice score for whole volume
+            mv_union_dice = 0. if mv_union_mask.sum() == 0 else dice_score(ground_truth_3d, mv_union_mask)
+
+            # add to results dict
+            for alg_name, dice in zip([mv_mean_alg_name, mv_union_alg_name], [mv_mean_dice, mv_union_dice]):
+                if alg_name not in results_dict['algos'].keys():
+                    results_dict['algos'][alg_name] = {"dice": [dice], "axis": slice_axes}
+                else:
+                    results_dict['algos'][alg_name]['dice'].append(dice)
+
+    print("\nDone iterating through patients...\n")
 
     # compute + print skipped frame stats
     flatten = lambda t: [item for sublist in t for item in sublist]
@@ -351,13 +387,13 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 labels = ["< " + str(min_threshold) if label == min_threshold else label for label in labels]
                 axs1[idx].set_xticklabels(labels)
 
-        plt.suptitle("Histogram of Dice Scores Averaged Across Scans\nN = %.0f" % len(dist))
+        plt.suptitle("Histogram of Dice Scores Across Scans\nN = %.0f" % len(dist))
         # adjust spacing
         plt.tight_layout()
         plt.subplots_adjust(top=0.90)
 
         if save_figs:
-            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist.png"), format="png")
+            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist2.png"), format="png")
         plt.show()
         plt.close('all')
 
@@ -369,29 +405,4 @@ if __name__ == '__main__':
     mask_predictions(CannyMask,
                      SobelMask,
                      MarchSquaresMask,
-                     EnsembleMeanMask, slice_axes=['x', 'y', 'z'], show_mask=True, show_hist=False, save_figs=True)
-
-# experiments to try
-# - remove all small objects
-# - play around with marching squares
-# - special logic for first and last bladder frame
-# - sobel, canny params, add prewitt edge detection
-# - pipeline approaches
-# - optimize params of the current algos
-# - what if we dont find the bladder range, and just use the seed and the algorithm finds the edges
-# - or bladder finder just knows the partial bladder range
-
-# - 3d
-
-# by wed morn
-# - 2d + frame classifier, pass in 0-100 frames
-# - multi-view 2d, compare all 3 views, ensemble
-
-
-# - end-to-end ml pipeline
-
-# - handcrafted, random forest, image classification
-# - multi-view 2d, compare all 3 views, ensemble
-
-
-# NEXT setup multi-view 2d
+                     EnsembleMeanMask, slice_axes=['x', 'y', 'z'], show_mask=False, show_hist=True, save_figs=False)

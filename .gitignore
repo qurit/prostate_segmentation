@@ -4,6 +4,7 @@
 .vscode/
 *.code-workspace
 *.zip
+*.pk
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

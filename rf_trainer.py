@@ -4,23 +4,24 @@ import tqdm
 import json
 import numpy as np
 from itertools import groupby, count
-import torch
 from utils import centre_crop
 from scipy import stats
-
+from dicom_code.contour_utils import parse_dicom_image
 from collections import Counter
+import pydicom as dicom
 
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC, SVR
 from sklearn.linear_model import LogisticRegression
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.utils import shuffle
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit
+from sklearn.model_selection import KFold
 
 DATA_DIR = "data"
+FRAMES_PER_PATIENT = 100  # TODO: make adaptive
 SEED = 69
+CROP_SIZE = 50  # TODO: try 50x50, 100x100 and 25x25
+K_FOLD_N_SPLITS = 5
 np.random.seed(SEED)
 
 
@@ -44,180 +45,188 @@ def get_pred_results(y_gt, y_pred):
 def main():
     # load up features and labels
     print("Loading features and labels into memory...")
-    X = pickle.load(open(os.path.join(DATA_DIR, "train_images_192.pk"), 'rb'), encoding='bytes')
-    y = pickle.load(open(os.path.join(DATA_DIR, "train_labels_192.pk"), 'rb'), encoding='bytes')
-    print("Raw\nX size: {}\ny size: {}".format(X.shape, y.shape))
-
-    # get test data
-    X_test = pickle.load(open(os.path.join(DATA_DIR, "test_images_192.pk"), 'rb'), encoding='bytes')
-    y_test = pickle.load(open(os.path.join(DATA_DIR, "test_labels_192.pk"), 'rb'), encoding='bytes')
-    print("Raw\nX_test size: {}\ny_test size: {}".format(X_test.shape, y_test.shape))
-    print("Done\n")
-
-    # take out 4 random patients from train set and move it into the test set
-    rand_train_idx = np.round(np.random.random(4) * 59).astype(int)  # should be [17 48 21 47]
-    print("Removing training examples:", rand_train_idx)
     with open(os.path.join(DATA_DIR, 'image_dataset/global_dict.json')) as f:
         data_dict = json.load(f)
-    move_patient_ids = [list(data_dict.keys())[i] for i in rand_train_idx]
-    print("Corresponding patient ids:", move_patient_ids)  # should be ['PSMA-01-664', 'PSMA-01-669', 'PSMA-01-211', 'PSMA-01-732']
+    all_patient_keys = list(data_dict.keys())
 
-    # update train set
-    move_X = X[rand_train_idx]
-    move_y = y[rand_train_idx]
-    X = np.delete(X, rand_train_idx, axis=0)
-    y = np.delete(y, rand_train_idx, axis=0)
-    # update test set
-    # X_test = torch.cat((X_test, move_X))  # these are different dimensions so just ignore for now
-    # y_test = y_test.append(move_y)
+    # take out 4 random patients from train set
+    rand_train_idx = np.round(np.random.random(4) * 59).astype(int)  # should be [17 48 21 47]
+    print("Removing training examples:", rand_train_idx)
+    to_remove_patient_keys = [all_patient_keys[i] for i in rand_train_idx]
+    print("Corresponding patient ids:", to_remove_patient_keys)  # should be ['PSMA-01-664', 'PSMA-01-669', 'PSMA-01-211', 'PSMA-01-732']
+
+    train_patient_keys = [patient_key for idx, patient_key in enumerate(all_patient_keys) if idx not in rand_train_idx]
+    assert (len(np.intersect1d(train_patient_keys, to_remove_patient_keys)) == 0)
+    # convert to dict
+    train_patient_idx_to_key_map = {}
+    for idx, patient_key in enumerate(train_patient_keys):
+        train_patient_idx_to_key_map[idx] = patient_key
+
+    X_train = []
+    y_train = []
+
+    for patient in tqdm.tqdm(train_patient_keys, desc="Patient keys"):
+        scan = data_dict[patient]['PT']
+        bladder = scan['rois']['Bladder']
+        bladder_frames = [frame for frame, contour in enumerate(bladder) if contour != []]
+
+        # specify which frames to consider from scan
+        frame_range = np.arange(0, FRAMES_PER_PATIENT)
+
+        # get all frame file paths in bladder range
+        frame_fps = [os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm') for frame in frame_range]
+
+        # generate 3d image from entire bladder frame range
+        img_3d = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps])
+        assert (len(np.shape(img_3d)) == 3)  # make sure image is 3d
+        X_train.append(img_3d)
+
+        # generate labels
+        y_train.append([1 if frame_idx in bladder_frames else 0 for frame_idx in frame_range])
+
+    # print info about dataset
+    X_train = np.asarray(X_train)
+    y_train = np.asarray(y_train)
+    print("Labels size: {}\nImages size: {}".format(y_train.shape, X_train.shape))
+    print("\nDone loading data!\n----------------------")
 
     # take a center crop
-    crop_size = (50, 50)  # TODO: try 50x50, 100x100 and 25x25
+    crop_size = (CROP_SIZE, CROP_SIZE)
+    print("\nTaking centre crop of size: {}...".format(crop_size))
     # pass in a copied image object, otherwise orig_img gets modified
-    X = centre_crop(X, (*np.shape(X)[0:2], *crop_size))
-    print("\nNew X size", X.shape)
-    # X_test = centre_crop(X_test, (*np.shape(X_test)[0:2], *crop_size)) FIXME: ignoring test data for now
+    X_train = centre_crop(X_train, (*np.shape(X_train)[0:2], *crop_size))
+    print("New X size", X_train.shape)
 
-    # flatten X such that shape is (samples, features) and y such that shape is (samples)
-    X = torch.flatten(X, start_dim=0, end_dim=1)
-    X = torch.flatten(X, start_dim=1).numpy()
-    y = torch.flatten(y, start_dim=0).numpy()
-
-    print("\nDone preprocessing data!\n----------------------")
-
-    print("X shape", np.shape(X))
-    print("y shape", np.shape(y))
-    print("Baseline accuracy", compute_baseline_score(y), "\n")
-    print("X_test shape", np.shape(X_test))
-    print("X_test_2 shape", np.shape(move_X))
-    print("y_test shape", np.shape(y_test))
-    print("y_test_2 shape", np.shape(move_y))
-    print("Baseline accuracy", compute_baseline_score(y_test), "\n")
+    # flatten X such that shape is (patients, frames, features)
+    print("\nFlattening features...")
+    X_train = np.reshape(X_train, (*X_train.shape[0:2], X_train.shape[2]*X_train.shape[3]))
 
     # remove mean and scale to unit variance
+    print("\nApplying standard scaling...\n")
     scaler = StandardScaler()
-    scaler.fit(X)
-    X = scaler.transform(X)  # TODO: make sure test features are also transformed
+    X_train = scaler.fit_transform(X_train.reshape(-1, X_train.shape[-1])).reshape(X_train.shape)  # TODO: make sure test features are also transformed
 
-    # generate groups to split train and val sets across patients
-    groups = np.tile(np.arange(0, 55), (100, 1)).flatten("F")
-    # expect train:val to be 44:11 across 5 different folds
-    group_kfold = GroupKFold(n_splits=5)
+    print("X shape", X_train.shape)
+    print("y shape", y_train.shape)
+    print("Baseline accuracy", compute_baseline_score(y_train), "\n")
+    print("\nDone preprocessing data!\n----------------------")
+
     print("Start training...\n")
-
     # define list of classifiers
     clfs = {"log-reg-l2": LogisticRegression(random_state=SEED, penalty="l2", class_weight='balanced', solver="sag", n_jobs=-1, max_iter=400),  # TODO: see if this helps
             "log-reg-l1": LogisticRegression(random_state=SEED, penalty="l1", class_weight='balanced', solver="saga", n_jobs=-1, max_iter=400),
             "svc-linear": SVC(kernel='linear', class_weight='balanced'),
             "svc-poly": SVC(kernel='poly', class_weight='balanced'),
-            "svc-rbf": SVC(kernel='rbf', class_weight='balanced')}
-            # FIXME "svr-linear": SVR(kernel='rbf')}  # no class_weight='balanced' for SVR...
-
-    # "rf": RandomForestClassifier(max_samples=1, max_depth=400, random_state=0, n_jobs=-1, max_features="log2",
-    #                                      min_samples_leaf=50, oob_score=True, class_weight="balanced")
-
-    results_dict = {"baseline": [], "val_size": [], "num_pred_all_zeros": 0}
-    split_num = 0
-    all_val_idx = []
+            "svc-rbf": SVC(kernel='rbf', class_weight='balanced')}  # TODO: drop 2 of these
     clfs_keys = list(clfs.keys())
     clfs_keys.append("ensemble")
 
-    for train_idx, val_idx in tqdm.tqdm(group_kfold.split(X, y, groups), total=group_kfold.get_n_splits(), desc="k-fold"):
+    # expect train:val to be 44:11 across 5 different folds
+    kf = KFold(n_splits=K_FOLD_N_SPLITS, random_state=SEED, shuffle=True)
+
+    results_dict = {"baseline": [], "val_size": [], "num_pred_all_zeros": 0, "clf": {}}
+    kf_split_num = 0
+    all_val_idx = []
+
+    for train_idx, val_idx in tqdm.tqdm(kf.split(list(train_patient_idx_to_key_map.keys())), total=kf.get_n_splits(), desc="k-fold"):
         # make sure val_idx have never been seen
         assert (len(np.intersect1d(all_val_idx, val_idx)) == 0)
-        print("\n#########################\n", "Split #", split_num, "\n")
-        split_num += 1
+        print("\n#########################\n", "Split #", kf_split_num, "\n")
+        kf_split_num += 1
         print("train_idx:", train_idx)
         print("val_idx:", val_idx)
         print("train size:", np.shape(train_idx)[0])
         print("val size:", np.shape(val_idx)[0])
-        baseline = compute_baseline_score(y[val_idx])
+        baseline = compute_baseline_score(y_train[val_idx])
         print("val baseline", baseline)
-        results_dict["baseline"].append(compute_baseline_score(y[val_idx]))
+        results_dict["baseline"].append(compute_baseline_score(y_train[val_idx]))
         results_dict["val_size"].append(np.shape(val_idx)[0])
         all_val_idx.extend(val_idx)
+
+        # find the patient keys corresponding to these indices
+        curr_patient_keys_train = [train_patient_idx_to_key_map[k] for k in train_idx]
+        curr_patient_keys_val = [train_patient_idx_to_key_map[k] for k in val_idx]
+        assert (len(np.intersect1d(curr_patient_keys_train, curr_patient_keys_val)) == 0)
+
+        # get X and y for this fold and reshape train data to (samples, features) and (samples) respectively
+        curr_X_train = X_train[train_idx]
+        curr_X_train = np.reshape(curr_X_train, (curr_X_train.shape[0]*curr_X_train.shape[1], curr_X_train.shape[2]))
+        curr_y_train = y_train[train_idx].flatten()
+
+        curr_X_val = X_train[val_idx]
+        curr_y_val = y_train[val_idx]
 
         # array to store preds from each clf for ensemble pred
         ensemble = []
 
         for clf_name in tqdm.tqdm(clfs_keys, desc="clf"):
+            if clf_name not in results_dict["clf"].keys():
+                results_dict["clf"][clf_name] = {kf_split_num: {}}
+            else:
+                results_dict["clf"][clf_name][kf_split_num] = {}
+            curr_clf_dict = {"train": curr_patient_keys_train, "val": {}}
+
             print("\n\nClassifier:", clf_name)
             if clf_name == "ensemble":
-                y_pred = np.round(np.mean(ensemble, axis=0)).astype(int)
+                all_y_preds = np.round(np.mean(ensemble, axis=0)).astype(int)
+                for idx, (y_pred, y_val, val_patient_key) in \
+                        enumerate(zip(all_y_preds.reshape(len(val_idx), curr_y_val.shape[1]), curr_y_val, curr_patient_keys_val)):
+                    pruned_pred = np.zeros_like(y_pred)
+                    # prune y_pred, get the longest contiguous prediction of ones in y_pred, thank you https://stackoverflow.com/a/44392621
+                    c = count()
+                    longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(), lambda x: x - next(c))), key=len)
+                    pruned_pred[longest_stretch_of_1s] = 1
+                    # store in dict
+                    curr_clf_dict["val"][val_patient_key] = {"pred": pruned_pred, "gt": y_val, "raw_preds": y_pred}
 
             else:
-                clf = clfs[clf_name].fit(X[train_idx], y[train_idx])
+                clf = clfs[clf_name].fit(curr_X_train, curr_y_train)
                 # show train acc
-                print("\nTraining acc:", np.sum(y[train_idx] == clf.predict(X[train_idx])) / len(train_idx))
+                print("\nTraining acc:", np.sum(curr_y_train == clf.predict(curr_X_train)) / len(train_idx))
 
-                # compute and save validation results
-                y_pred = clf.predict(X[val_idx])
-                ensemble.append(y_pred)
+                # get predictions for each patient in the val set
+                all_y_preds = []
+                for idx, (X_val, y_val, val_patient_key) in enumerate(zip(curr_X_val, curr_y_val, curr_patient_keys_val)):
+                    y_pred = clf.predict(X_val)
+                    pruned_pred = np.zeros_like(y_pred)
+                    # prune y_pred, get the longest contiguous prediction of ones in y_pred, thank you https://stackoverflow.com/a/44392621
+                    c = count()
+                    try:
+                        longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(),
+                                                                                 lambda x: x - next(c))), key=len)
+                        pruned_pred[longest_stretch_of_1s] = 1
+                    except:
+                        print("\033[91m" + "WARNING: FOUND A PATIENT WHICH WAS PREDICTED ALL 0s" + "\n\033[0m")
+                        results_dict["num_pred_all_zeros"] += 1
 
-            # pruning step
-            y_pred_reshaped = y_pred.reshape(int(len(val_idx)/100), 100)
-            new_preds = np.zeros_like(y_pred_reshaped)
-            # get the longest contiguous prediction of ones in y_pred, thank you https://stackoverflow.com/a/44392621
-            c = count()
-            for pat, y_pred_pat in enumerate(y_pred_reshaped):
-                try:
-                    longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred_pat == 1).flatten(), lambda x: x-next(c))), key=len)
-                    new_preds[pat][longest_stretch_of_1s] = 1
-                except:
-                    print("\033[91m" + "WARNING: FOUND A PATIENT WHICH WAS PREDICTED ALL 0s")
-                    print("y_pred", y_pred_pat)
-                    print("y_gt", y[val_idx][pat*100:(pat+1)*100], "\n\033[0m")
-                    results_dict["num_pred_all_zeros"] += 1
-                    continue
-            new_preds = new_preds.ravel()
+                    all_y_preds.extend(pruned_pred)
+                    # store in dict
+                    curr_clf_dict["val"][val_patient_key] = {"pred": pruned_pred, "gt": y_val, "raw_preds": y_pred}
 
-            # show prediction for random patient
-            rand_idx = int(np.random.random() * len(y_pred)/100)
-            print("rand_idx", rand_idx)
-            print("y_pred", y_pred[rand_idx*100:(rand_idx+1)*100])
-            print("y_gt", y[val_idx][rand_idx*100:(rand_idx+1)*100])
-            conf_matrix, acc = get_pred_results(y[val_idx], y_pred)
+                ensemble.append(all_y_preds)
 
             print("\n\033[92m****Results with pruned predictions****")
-            conf_matrix_p, acc_p = get_pred_results(y[val_idx], new_preds)
+            conf_matrix, acc = get_pred_results(curr_y_val.flatten(), all_y_preds)
             print("\033[0m")
 
-            if clf_name not in results_dict.keys():
-                results_dict[clf_name] = {"acc": [acc],
-                                          "tn": [conf_matrix[0][0]], "fn": [conf_matrix[1][0]],
-                                          "tp": [conf_matrix[1][1]], "fp": [conf_matrix[0][1]],
-
-                                          "acc_p": [acc_p],
-                                          "tn_p": [conf_matrix_p[0][0]], "fn_p": [conf_matrix_p[1][0]],
-                                          "tp_p": [conf_matrix_p[1][1]], "fp_p": [conf_matrix_p[0][1]]}
-            else:
-                results_dict[clf_name]["acc"].append(acc)
-                results_dict[clf_name]["tn"].append(conf_matrix[0][0])
-                results_dict[clf_name]["fn"].append(conf_matrix[1][0])
-                results_dict[clf_name]["tp"].append(conf_matrix[1][1])
-                results_dict[clf_name]["fp"].append(conf_matrix[0][1])
-
-                results_dict[clf_name]["acc_p"].append(acc_p)
-                results_dict[clf_name]["tn_p"].append(conf_matrix_p[0][0])
-                results_dict[clf_name]["fn_p"].append(conf_matrix_p[1][0])
-                results_dict[clf_name]["tp_p"].append(conf_matrix_p[1][1])
-                results_dict[clf_name]["fp_p"].append(conf_matrix_p[0][1])
+            # add val results to dict
+            aggregated_val_results = {"acc": acc,
+                                      "tn": conf_matrix[0][0], "fn": conf_matrix[1][0],
+                                      "tp": conf_matrix[1][1], "fp": conf_matrix[0][1]}
+            results_dict["clf"][clf_name][kf_split_num] = {**curr_clf_dict, **aggregated_val_results}
+            # TODO: logic to save out model
 
     print("Done training!", "\n________________________\n")
-    print("results_dict", results_dict)
 
     # save to disk
-    with open('results_dict_fixed_data_' + str(crop_size[0]) + "x" + str(crop_size[1]) + '.pk', 'wb') as handle:
+    with open('results_dict_refactored_' + str(crop_size[0]) + "x" + str(crop_size[1]) + '.pk', 'wb') as handle:
         pickle.dump(results_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    print("\nComputing mean accuracy for each algorithm...")
+    print("\nComputing mean accuracy for each classifier across KFolds...")
     # print mean scores of all classifiers
     for clf_name in clfs_keys:
-        print("     ", clf_name, np.mean(results_dict[clf_name]['acc']))
-
-    print("\n****Results with pruned predictions****")
-    for clf_name in clfs_keys:
-        print("     ", clf_name, np.mean(results_dict[clf_name]['acc_p']))
+        acc_arr = [results_dict["clf"][clf_name][fold]["acc"] for fold in results_dict["clf"][clf_name]]
+        print("     ", clf_name, np.mean(acc_arr))
 
     print("\033[91m\nNumber of patients which were predicted all 0s:", results_dict["num_pred_all_zeros"], "\n\033[0m")
 
@@ -239,6 +248,8 @@ def main():
     #  4. after each fit on the train set, run edge detection on the val set and then save out dice score
 
     # TODO: could try PCA then knn
+
+    # TODO: refactor so data stays split across patients so shape is (patients, 100 (variable), frame_shape)
 
 
 if __name__ == '__main__':

@@ -1,146 +1,54 @@
 import json
 import tqdm
-import scipy
 import os
+import pickle
 import numpy as np
 import pydicom as dicom
 import matplotlib.pyplot as plt
 
-import skimage
-import skimage.filters
-import skimage.feature
-import skimage.segmentation
-from skimage import measure
+from bladder_segmentation.masks import SobelMask, CannyMask, MarchSquaresMask, EnsembleMeanMask
 from utils import contour2mask, centre_crop, dice_score
 from dicom_code.contour_utils import parse_dicom_image
 
 DATA_DIR = 'data'
+FRAMES_PER_PATIENT = 100  # TODO: make adaptive
 
 
-class SobelMask:
-    def __init__(self):
-        self.name = "Sobel"
+def generate_mask_predictions(*algorithms, dataset="image_dataset",
+                              show_mask=False, show_hist=False, save_figs=False,
+                              slice_axes=None, bladder_frame_mode="gt", pred_dict=None):
+    """
+    Mask prediction step for the bladder segmentation pipeline. Will compute masks for all edge detection algorithms
+    specified in the *algorithms arg.
 
-    @staticmethod
-    def compute_mask(img):
-        mask = skimage.filters.sobel(img)
-        markers = np.zeros_like(img)
-        # set to background marker
-        markers[img < 8000] = 1
-        # set to bladder marker
-        markers[img > np.max(img) * .15] = 2
-        # separate bladder from background
-        mask = skimage.segmentation.watershed(mask, markers)
-        mask[mask == 1] = 0
-        mask[mask == 2] = 1
-        # remove objects smaller than min size
-        mask = skimage.morphology.remove_small_objects(mask.astype(bool), min_size=30)
+    The following are the 3 modes specified by 'bladder_frame_mode' arg:
+        1. Run edge detection on all frames part of the specified frame range 0,...,FRAMES_PER_PATIENT
+        2. Run edge detection on all frames part of the ground truth bladder frame range
+        3. Run edge detection on all frames, then zero-out frames not part of the predicted bladder frame range
 
-        canny = CannyMask.compute_mask(img)
-        if mask.sum() < 5:
-            mask = canny
+    Args:
+        *algorithms: Variable-length argument list for the specified edge detection algorithms
+        dataset: Name of the dataset inside DATA_DIR, "image_dataset" or "test_dataset"
+        slice_axes: The list of axes to perform slicing of frames, default is ["z"] when set to None
+        show_mask: Option to plot the predicted and ground truth masks for each frame in the bladder range
+        show_hist: Option to show the histogram of dice scores across all scans
+        save_figs: Option to save the outputted figures
+        bladder_frame_mode: Specifies the mode "all" (1), "gt" (2), or "pred" (3) Default is "gt"
+        pred_dict: Specifies subset of patients to run edge detection and predictions of bladder frame range
+                   dict structure is the following: {"patient-key": [list of frame indices containing bladder"}
 
-        return mask
+    Returns:
 
-
-class CannyMask:
-    def __init__(self):
-        self.name = "Canny"
-
-    @staticmethod
-    def compute_mask(img):
-        mask = skimage.feature.canny(img, low_threshold=5000, sigma=4.2)
-        markers = np.zeros_like(img)
-        markers[img < 8000] = 1
-        markers[img > np.max(img) * .25] = 2
-        mask = skimage.segmentation.watershed(mask, markers)
-        mask[mask == 1] = 0
-        mask[mask == 2] = 1
-        mask = scipy.ndimage.morphology.binary_fill_holes(mask)
-
-        if mask.sum() > 100:
-            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 30)
-        else:
-            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 25)
-
-        return mask
-
-
-class MarchSquaresMask:
-    def __init__(self):
-        self.name = "Marching-Squares"
-
-    @staticmethod
-    def compute_mask(img, level=21000):
-        contours = measure.find_contours(img, level=level)  # TODO: try mask param in find_contours
-
-        if len(contours) == 0:
-            mask = np.zeros(img.shape, int)
-
-        else:
-            # get the largest contour which should be the bladder
-            list_len = [len(i) for i in contours]
-            contours = [contours[np.argmax(list_len)]]
-            # convert to array of ints
-            contours = np.rint(contours).astype(int)
-            # convert to mask
-            mask = contour2mask(contours, img.shape, xy_ordering=False)  # TODO: check if not just an outline
-
-        return mask
-
-
-class EnsembleMeanMask:
-    def __init__(self):
-        self.name = "Ensemble-Mean"
-
-    @staticmethod
-    def compute_mask(img):
-        mask = [CannyMask.compute_mask(img),
-                SobelMask.compute_mask(img),
-                MarchSquaresMask.compute_mask(img)]
-
-        mask = sum([m.astype(int) for m in mask]) / len(mask)
-        mask = np.round(mask).astype(int)
-
-        return mask
-
-
-class EnsembleUnionMask:
-    def __init__(self):
-        self.name = "Ensemble-Union"
-
-    @staticmethod
-    def compute_mask(img):
-        mask = [CannyMask.compute_mask(img),
-                SobelMask.compute_mask(img),
-                MarchSquaresMask.compute_mask(img)]
-
-        mask = sum([m.astype(int) for m in mask])
-        mask[mask > 1] = 1
-
-        return mask
-
-
-class DummyMask:
-    def __init__(self):
-        self.name = "Dummy"
-
-    @staticmethod
-    def compute_mask(img):
-        return np.ones(img.shape, int)
-
-
-# add more edge detection algorithms here
-
-
-def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=False, save_figs=False):
+    """
     if not slice_axes:
         slice_axes = ["z"]
     check_axes = [a for a in slice_axes if a in ['x', 'y', 'z']]
     assert (len(check_axes) == len(slice_axes))
     axis_label_map = {"z": ["x", "y"], "y": ["x", "z"], "x": ["z", "y"]}
 
-    with open(os.path.join(DATA_DIR, 'image_dataset/global_dict.json')) as f:
+    assert (bladder_frame_mode in ["all", "gt", "pred"])
+
+    with open(os.path.join(DATA_DIR, dataset, 'global_dict.json')) as f:
         data_dict = json.load(f)
 
     # dir where figs are saved
@@ -154,7 +62,14 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
     # initialize dict to store experiments results
     results_dict = {"algos": {}, "skipped": {}}
 
-    for patient in tqdm.tqdm(data_dict.keys()):
+    # specify which frames to consider from scan
+    if bladder_frame_mode in ["all", "pred"]:
+        frame_range = np.arange(0, FRAMES_PER_PATIENT)
+
+    # if pred_dict is set then run edge detection on those patients otherwise get patients from dataset
+    patient_keys = pred_dict.keys() if pred_dict else data_dict.keys()
+
+    for patient in tqdm.tqdm(patient_keys):
         scan = data_dict[patient]['PT']
         rois = scan['rois']
         bladder = rois['Bladder']
@@ -162,13 +77,19 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
         # dict to store dice score and mask results for 1 patient
         patient_pred_dict = {}
 
-        # get the first and last bladder frame indices
-        bladder_frames = [frame for frame, contour in enumerate(bladder) if contour != []]
-        check_continuous = lambda l: sorted(l) == list(range(min(l), max(l) + 1))
-        assert check_continuous(bladder_frames)
+        if bladder_frame_mode == "gt":
+            # get the ground truth first and last bladder frame indices
+            bladder_frames_gt = [frame for frame, contour in enumerate(bladder) if contour != []]
+            check_continuous = lambda l: sorted(l) == list(range(min(l), max(l) + 1))
+            assert check_continuous(bladder_frames_gt)
+            frame_range = bladder_frames_gt
+
+        # get the predicted bladder frame range
+        if bladder_frame_mode == "pred":
+            bladder_frames_preds = pred_dict[patient]
 
         # get all frame file paths in bladder range
-        frame_fps = [os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm') for frame in bladder_frames]
+        frame_fps = [os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm') for frame in frame_range]
 
         # generate 3d image from entire bladder frame range
         orig_img_3d = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps])
@@ -177,7 +98,7 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
         z_size, y_size, x_size = orig_img_size
 
         # generate the 3d ground truth mask
-        ground_truth_3d = np.asarray([contour2mask(bladder[frame], orig_img_size[1:3]) for frame in bladder_frames])
+        ground_truth_3d = np.asarray([contour2mask(bladder[frame], orig_img_size[1:3]) for frame in frame_range])
         assert (np.shape(ground_truth_3d) == orig_img_size)
 
         # skip frame if ground truth mask smaller than small threshold
@@ -212,7 +133,7 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
 
                 crop_size = (z_size, 100)
                 img = centre_crop(np.copy(trans_img), (y_size, *crop_size))
-                img[img < 5000] = 0.  # TODO: find right value
+                img[img < 5000] = 0.
 
             else:
                 # set depth axis to x - swap x and z
@@ -220,7 +141,7 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 trans_gt = np.swapaxes(ground_truth_3d, 2, 0)
 
                 crop_size = (100, z_size)
-                img = centre_crop(np.copy(trans_img), (x_size, *crop_size))  # TODO: use 100x100 center crop
+                img = centre_crop(np.copy(trans_img), (x_size, *crop_size))
                 img[img < 5000] = 0.
 
             trans_img_size = np.shape(trans_img)
@@ -238,6 +159,17 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 # apply the centered crop mask onto the full image size
                 full_mask_3d[:, a1:b1, a2:b2] = curr_mask_3d
 
+                if bladder_frame_mode == "pred":
+                    # zero out frames which are not inside the predicted bladder frame range
+                    for idx in frame_range:
+                        if idx not in bladder_frames_preds:
+                            if curr_axis == 'z':
+                                full_mask_3d[idx] *= 0
+                            elif curr_axis == 'y':
+                                full_mask_3d[:, idx, :] *= 0
+                            else:
+                                full_mask_3d[:, :, idx] *= 0
+
                 # compute dice score for the whole volume
                 dice = 0. if full_mask_3d.sum() == 0 else dice_score(trans_gt, full_mask_3d)
 
@@ -249,7 +181,6 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                     patient_pred_dict[alg_name][curr_axis] = to_save
 
             if show_mask:
-                # TODO plot 3d gt and pred mask
                 size = len(patient_pred_dict.keys()) + 2
                 empty_mask_frames = [i for i, mask in enumerate(trans_gt) if mask.sum() == 0]
                 fig_num = 0
@@ -310,6 +241,7 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                     results_dict['algos'][key_name]['dice'].append(a[axis]['dice'])
 
         if len(slice_axes) > 1:
+            # TODO: try intersection
             best_alg = patient_pred_dict["Ensemble-Mean"]  # assumes this is the best alg
             masks = []
             # revert all masks back to the standard (z, y, x) shape i.e. z is the depth axis
@@ -369,8 +301,9 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
     if show_hist:
         # set threshold below which lower values will be part of the same bin
         min_threshold = 0.7
+        # TODO: add text which specifies number of scores below min_threshold
         # plot hist of dice scores averaged across scans
-        figsize = (6, int(len(algos_dict)/6 * 9))
+        figsize = (6, round(len(algos_dict)/5 * 9))
         fig1, axs1 = plt.subplots(len(algos_dict.keys()), figsize=figsize, sharex=True)
         for idx, alg_name in enumerate(algos_dict.keys()):
             # put everything below min threshold in the same bin
@@ -388,21 +321,35 @@ def mask_predictions(*algorithms, slice_axes=None, show_mask=False, show_hist=Fa
                 axs1[idx].set_xticklabels(labels)
 
         plt.suptitle("Histogram of Dice Scores Across Scans\nN = %.0f" % len(dist))
+        plt.xlabel("Dice score")
         # adjust spacing
         plt.tight_layout()
         plt.subplots_adjust(top=0.90)
 
         if save_figs:
-            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist2.png"), format="png")
+            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist_full_val_set_multi_view_" + bladder_frame_mode + ".png"), format="png")
         plt.show()
         plt.close('all')
 
-        # TODO: plot sums across each slice and compare to ground truth
-
 
 if __name__ == '__main__':
+    # get predictions on validation set
+    classifier_results = pickle.load(open("results_dict_refactored_50x50.pk", 'rb'), encoding='bytes')
+    # get ensemble model
+    model_dict = classifier_results['clf']['ensemble']
+
+    # iterate through each fold and get the corresponding patients keys and predictions
+    preds = {}
+    for fold in model_dict.keys():
+        for patient in model_dict[fold]['val']:
+            arr = model_dict[fold]['val'][patient]['pred']
+            arr = np.where(arr != 0)[0]
+            preds[patient] = arr
+
     # add arbitrary number of edge detection algorithms in the args
-    mask_predictions(CannyMask,
-                     SobelMask,
-                     MarchSquaresMask,
-                     EnsembleMeanMask, slice_axes=['x', 'y', 'z'], show_mask=False, show_hist=True, save_figs=False)
+    generate_mask_predictions(CannyMask,
+                              SobelMask,
+                              MarchSquaresMask,
+                              EnsembleMeanMask,
+                              dataset="image_dataset", slice_axes=['x', 'y', 'z'],
+                              show_mask=False, show_hist=True, save_figs=False, bladder_frame_mode="gt", pred_dict=preds)

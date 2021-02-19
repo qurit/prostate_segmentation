@@ -3,24 +3,23 @@ import pickle
 import tqdm
 import json
 import numpy as np
-from itertools import groupby, count
-from utils import centre_crop
 from scipy import stats
-from dicom_code.contour_utils import parse_dicom_image
-from collections import Counter
 import pydicom as dicom
+from itertools import groupby, count
 
 from sklearn.svm import SVC, SVR
 from sklearn.linear_model import LogisticRegression
-
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import KFold
 
+from utils import centre_crop
+from dicom_code.contour_utils import parse_dicom_image
+
 DATA_DIR = "data"
 FRAMES_PER_PATIENT = 100  # TODO: make adaptive
 SEED = 69
-CROP_SIZE = 50  # TODO: try 50x50, 100x100 and 25x25
+CROP_SIZE = 50
 K_FOLD_N_SPLITS = 5
 np.random.seed(SEED)
 
@@ -42,10 +41,22 @@ def get_pred_results(y_gt, y_pred):
     return conf_matrix, acc
 
 
-def main():
+def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_name=""):
+    """
+    Trains a bladder frame classifier for the bladder segmentation pipeline. Does 5-Fold cross validation and saves the
+    predictions on the validation set for each fold. The train-val set split is 44:11
+
+    Args:
+        dataset: Name of the dataset inside DATA_DIR, "image_dataset" or "test_dataset"
+        save_results: Option to save the results to disk
+        run_name: Option to give a name to the training run which will add a suffix to the saved results dict
+
+    Returns:
+
+    """
     # load up features and labels
     print("Loading features and labels into memory...")
-    with open(os.path.join(DATA_DIR, 'image_dataset/global_dict.json')) as f:
+    with open(os.path.join(DATA_DIR, dataset, 'global_dict.json')) as f:
         data_dict = json.load(f)
     all_patient_keys = list(data_dict.keys())
 
@@ -65,13 +76,13 @@ def main():
     X_train = []
     y_train = []
 
+    # specify which frames to consider from scan
+    frame_range = np.arange(0, FRAMES_PER_PATIENT)
+
     for patient in tqdm.tqdm(train_patient_keys, desc="Patient keys"):
         scan = data_dict[patient]['PT']
         bladder = scan['rois']['Bladder']
         bladder_frames = [frame for frame, contour in enumerate(bladder) if contour != []]
-
-        # specify which frames to consider from scan
-        frame_range = np.arange(0, FRAMES_PER_PATIENT)
 
         # get all frame file paths in bladder range
         frame_fps = [os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm') for frame in frame_range]
@@ -113,7 +124,7 @@ def main():
 
     print("Start training...\n")
     # define list of classifiers
-    clfs = {"log-reg-l2": LogisticRegression(random_state=SEED, penalty="l2", class_weight='balanced', solver="sag", n_jobs=-1, max_iter=400),  # TODO: see if this helps
+    clfs = {"log-reg-l2": LogisticRegression(random_state=SEED, penalty="l2", class_weight='balanced', solver="sag", n_jobs=-1, max_iter=400),
             "log-reg-l1": LogisticRegression(random_state=SEED, penalty="l1", class_weight='balanced', solver="saga", n_jobs=-1, max_iter=400),
             "svc-linear": SVC(kernel='linear', class_weight='balanced'),
             "svc-poly": SVC(kernel='poly', class_weight='balanced'),
@@ -156,7 +167,7 @@ def main():
         curr_X_val = X_train[val_idx]
         curr_y_val = y_train[val_idx]
 
-        # array to store preds from each clf for ensemble pred
+        # array to store preds from each clf for ensemble pred_dict
         ensemble = []
 
         for clf_name in tqdm.tqdm(clfs_keys, desc="clf"):
@@ -177,7 +188,7 @@ def main():
                     longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(), lambda x: x - next(c))), key=len)
                     pruned_pred[longest_stretch_of_1s] = 1
                     # store in dict
-                    curr_clf_dict["val"][val_patient_key] = {"pred": pruned_pred, "gt": y_val, "raw_preds": y_pred}
+                    curr_clf_dict["val"][val_patient_key] = {"pred_dict": pruned_pred, "gt": y_val, "raw_preds": y_pred}
 
             else:
                 clf = clfs[clf_name].fit(curr_X_train, curr_y_train)
@@ -195,13 +206,13 @@ def main():
                         longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(),
                                                                                  lambda x: x - next(c))), key=len)
                         pruned_pred[longest_stretch_of_1s] = 1
-                    except:
+                    except ValueError:
                         print("\033[91m" + "WARNING: FOUND A PATIENT WHICH WAS PREDICTED ALL 0s" + "\n\033[0m")
                         results_dict["num_pred_all_zeros"] += 1
 
                     all_y_preds.extend(pruned_pred)
                     # store in dict
-                    curr_clf_dict["val"][val_patient_key] = {"pred": pruned_pred, "gt": y_val, "raw_preds": y_pred}
+                    curr_clf_dict["val"][val_patient_key] = {"pred_dict": pruned_pred, "gt": y_val, "raw_preds": y_pred}
 
                 ensemble.append(all_y_preds)
 
@@ -218,9 +229,10 @@ def main():
 
     print("Done training!", "\n________________________\n")
 
-    # save to disk
-    with open('results_dict_refactored_' + str(crop_size[0]) + "x" + str(crop_size[1]) + '.pk', 'wb') as handle:
-        pickle.dump(results_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    if save_results:
+        # save to disk
+        with open('results_dict_' + run_name + '_' + str(crop_size[0]) + "x" + str(crop_size[1]) + '.pk', 'wb') as handle:
+            pickle.dump(results_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     print("\nComputing mean accuracy for each classifier across KFolds...")
     # print mean scores of all classifiers
@@ -230,27 +242,8 @@ def main():
 
     print("\033[91m\nNumber of patients which were predicted all 0s:", results_dict["num_pred_all_zeros"], "\n\033[0m")
 
-    # evaluate on test set
-    # fit
-    # clf.fit(X, y)
-    #
-    # # predict
-    # y_pred = clf.predict(X_test)
-    #
-    # # get mean accuracy
-    # print("Mean test accuracy", clf.score(X_test, y_test))
-
-    # priority list
-    #  1. better way to visually compare y_pred with y_gt, print bladder frame range for each
-    #  3. ensemble, only at test time
-    #  4. probabilities of predictions
-
-    #  4. after each fit on the train set, run edge detection on the val set and then save out dice score
-
-    # TODO: could try PCA then knn
-
-    # TODO: refactor so data stays split across patients so shape is (patients, 100 (variable), frame_shape)
+    # TODO: add inference on test data
 
 
 if __name__ == '__main__':
-    main()
+    frame_classifier_trainer(dataset="image_dataset", save_results=False, run_name="")

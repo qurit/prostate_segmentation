@@ -167,7 +167,7 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
         curr_X_val = X_train[val_idx]
         curr_y_val = y_train[val_idx]
 
-        # array to store preds from each clf for ensemble pred_dict
+        # array to store preds from each clf for ensemble pred
         ensemble = []
 
         for clf_name in tqdm.tqdm(clfs_keys, desc="clf"):
@@ -188,7 +188,7 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
                     longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(), lambda x: x - next(c))), key=len)
                     pruned_pred[longest_stretch_of_1s] = 1
                     # store in dict
-                    curr_clf_dict["val"][val_patient_key] = {"pred_dict": pruned_pred, "gt": y_val, "raw_preds": y_pred}
+                    curr_clf_dict["val"][val_patient_key] = {"pred": pruned_pred, "gt": y_val, "raw_preds": y_pred}
 
             else:
                 clf = clfs[clf_name].fit(curr_X_train, curr_y_train)
@@ -212,7 +212,7 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
 
                     all_y_preds.extend(pruned_pred)
                     # store in dict
-                    curr_clf_dict["val"][val_patient_key] = {"pred_dict": pruned_pred, "gt": y_val, "raw_preds": y_pred}
+                    curr_clf_dict["val"][val_patient_key] = {"pred": pruned_pred, "gt": y_val, "raw_preds": y_pred}
 
                 ensemble.append(all_y_preds)
 

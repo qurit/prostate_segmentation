@@ -167,7 +167,8 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
     # expect train:val to be 44:11 across 5 different folds
     kf = KFold(n_splits=K_FOLD_N_SPLITS, random_state=SEED, shuffle=True)
 
-    results_dict = {"baseline": [], "val_size": [], "num_pred_all_zeros": 0, "num_missed_pred_frame": 0, "clf": {}}
+    results_dict = {"feature_means": scaler.mean_, "feature_vars": scaler.var_, "baseline": [], "val_size": [],
+                    "num_pred_all_zeros": 0, "num_missed_pred_frame": 0, "clf": {}}
     kf_split_num = 0
     all_val_idx = []
 
@@ -268,4 +269,4 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
 
 
 if __name__ == '__main__':
-    frame_classifier_trainer(dataset="image_dataset", save_results=True, run_name="pred_frame_finder")
+    frame_classifier_trainer(dataset="image_dataset", save_results=True, run_name="")

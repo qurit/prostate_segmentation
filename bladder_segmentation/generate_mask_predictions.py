@@ -181,7 +181,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset",
                 else:
                     patient_pred_dict[alg_name][curr_axis] = to_save
 
-            if show_mask:
+            if show_mask:  # TODO: move this
                 size = len(patient_pred_dict.keys()) + 2
                 empty_mask_frames = [i for i, mask in enumerate(trans_gt) if mask.sum() == 0]
                 fig_num = 0
@@ -298,6 +298,10 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset",
         avg = np.mean(algos_dict[alg_name]["dice"])
         print("{} average dice score: {}".format(alg_name, avg))
 
+    results_dict["patient_keys"] = list(patient_keys)
+    with open(os.path.join(DATA_DIR, 'mask_prediction_results_dict_' + run_name + "_" + bladder_frame_mode + '.json'), 'w', encoding='utf-8') as f:
+        json.dump(results_dict, f, ensure_ascii=False, indent=4)
+
     # plots histograms of the dice scores for each algorithm
     if show_hist:
         # set threshold below which lower values will be part of the same bin
@@ -335,9 +339,11 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset",
 
 if __name__ == '__main__':
     # get predictions on validation set
-    classifier_results = pickle.load(open("results_dict_refactored_50x50.pk", 'rb'), encoding='bytes')
-    # get ensemble model
-    model_dict = classifier_results['clf']['ensemble']
+    classifier_results = pickle.load(open("results_dict_pred_frame_finder_50x50.pk", 'rb'), encoding='bytes')
+    # specify classifier
+    clf = 'svc-rbf'
+    # get model predictions
+    model_dict = classifier_results['clf'][clf]
 
     # iterate through each fold and get the corresponding patients keys and predictions
     preds = {}
@@ -352,5 +358,5 @@ if __name__ == '__main__':
                               SobelMask,
                               MarchSquaresMask,
                               EnsembleMeanMask,
-                              dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name="full_val_set_multi_view",
-                              show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="gt", pred_dict=preds)
+                              dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name="",
+                              show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="pred", pred_dict=preds)

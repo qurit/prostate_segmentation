@@ -16,7 +16,7 @@ FRAMES_PER_PATIENT = 100  # TODO: make adaptive
 
 def generate_mask_predictions(*algorithms, dataset="image_dataset",
                               show_mask=False, show_hist=False, save_figs=False,
-                              slice_axes=None, bladder_frame_mode="gt", pred_dict=None):
+                              slice_axes=None, bladder_frame_mode="gt", pred_dict=None, run_name=""):
     """
     Mask prediction step for the bladder segmentation pipeline. Will compute masks for all edge detection algorithms
     specified in the *algorithms arg.
@@ -33,6 +33,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset",
         show_mask: Option to plot the predicted and ground truth masks for each frame in the bladder range
         show_hist: Option to show the histogram of dice scores across all scans
         save_figs: Option to save the outputted figures
+        run_name: Option to give a name to the mask prediction run which will add a suffix to the saved dice hist plot
         bladder_frame_mode: Specifies the mode "all" (1), "gt" (2), or "pred" (3) Default is "gt"
         pred_dict: Specifies subset of patients to run edge detection and predictions of bladder frame range
                    dict structure is the following: {"patient-key": [list of frame indices containing bladder"}
@@ -327,7 +328,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset",
         plt.subplots_adjust(top=0.90)
 
         if save_figs:
-            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist_full_val_set_multi_view_" + bladder_frame_mode + ".png"), format="png")
+            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist_" + run_name + "_" + bladder_frame_mode + ".png"), format="png")
         plt.show()
         plt.close('all')
 
@@ -351,5 +352,5 @@ if __name__ == '__main__':
                               SobelMask,
                               MarchSquaresMask,
                               EnsembleMeanMask,
-                              dataset="image_dataset", slice_axes=['x', 'y', 'z'],
-                              show_mask=False, show_hist=True, save_figs=False, bladder_frame_mode="gt", pred_dict=preds)
+                              dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name="full_val_set_multi_view",
+                              show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="gt", pred_dict=preds)

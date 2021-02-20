@@ -15,6 +15,7 @@ from sklearn.model_selection import KFold
 
 from utils import centre_crop
 from dicom_code.contour_utils import parse_dicom_image
+from bladder_segmentation.pred_frame_finder import BladderFrameFinder
 
 DATA_DIR = "data"
 FRAMES_PER_PATIENT = 100  # TODO: make adaptive
@@ -39,6 +40,34 @@ def get_pred_results(y_gt, y_pred):
     print("Validation acc:", acc)
 
     return conf_matrix, acc
+
+
+def prune_pred(y_pred, results_dict, pred_frame):
+    pruned_pred = np.zeros_like(y_pred)
+
+    if y_pred.sum() == 0:
+        print("\033[91m" + "WARNING: FOUND A PATIENT WHICH WAS PREDICTED ALL 0s" + "\n\033[0m")
+        results_dict["num_pred_all_zeros"] += 1
+
+    else:
+        # prune y_pred, get the longest contiguous prediction of ones in y_pred, thank you https://stackoverflow.com/a/44392621
+        c = count()
+        longest_stretch_of_1s = [list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(), lambda x: x - next(c))]
+
+        # iterate through each of the candidate bladder frame ranges and find the one which contains pred_frame
+        for lst in longest_stretch_of_1s:
+            if pred_frame in lst:
+                # found a predicted range which contains pred_frame so update predictions
+                pruned_pred[lst] = 1
+                break
+
+        # check if pruned_pred has been updated
+        if pruned_pred.sum() == 0:
+            print("\033[91m" + "WARNING: FOUND A PREDICTION WHICH DID NOT CONTAIN PRED_FRAME" + "\n\033[0m")
+            results_dict["num_missed_pred_frame"] += 1
+            pruned_pred[max(longest_stretch_of_1s, key=len)] = 1
+
+    return pruned_pred, results_dict
 
 
 def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_name=""):
@@ -123,19 +152,22 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
     print("\nDone preprocessing data!\n----------------------")
 
     print("Start training...\n")
+    # initialize bladder frame object
+    bladder_frame_finder = BladderFrameFinder()
+
     # define list of classifiers
     clfs = {"log-reg-l2": LogisticRegression(random_state=SEED, penalty="l2", class_weight='balanced', solver="sag", n_jobs=-1, max_iter=400),
             "log-reg-l1": LogisticRegression(random_state=SEED, penalty="l1", class_weight='balanced', solver="saga", n_jobs=-1, max_iter=400),
             "svc-linear": SVC(kernel='linear', class_weight='balanced'),
             "svc-poly": SVC(kernel='poly', class_weight='balanced'),
-            "svc-rbf": SVC(kernel='rbf', class_weight='balanced')}  # TODO: drop 2 of these
+            "svc-rbf": SVC(kernel='rbf', class_weight='balanced')}
     clfs_keys = list(clfs.keys())
     clfs_keys.append("ensemble")
 
     # expect train:val to be 44:11 across 5 different folds
     kf = KFold(n_splits=K_FOLD_N_SPLITS, random_state=SEED, shuffle=True)
 
-    results_dict = {"baseline": [], "val_size": [], "num_pred_all_zeros": 0, "clf": {}}
+    results_dict = {"baseline": [], "val_size": [], "num_pred_all_zeros": 0, "num_missed_pred_frame": 0, "clf": {}}
     kf_split_num = 0
     all_val_idx = []
 
@@ -180,13 +212,10 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
             print("\n\nClassifier:", clf_name)
             if clf_name == "ensemble":
                 all_y_preds = np.round(np.mean(ensemble, axis=0)).astype(int)
-                for idx, (y_pred, y_val, val_patient_key) in \
-                        enumerate(zip(all_y_preds.reshape(len(val_idx), curr_y_val.shape[1]), curr_y_val, curr_patient_keys_val)):
-                    pruned_pred = np.zeros_like(y_pred)
-                    # prune y_pred, get the longest contiguous prediction of ones in y_pred, thank you https://stackoverflow.com/a/44392621
-                    c = count()
-                    longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(), lambda x: x - next(c))), key=len)
-                    pruned_pred[longest_stretch_of_1s] = 1
+                for y_pred, y_val, val_patient_key in zip(all_y_preds.reshape(len(val_idx), curr_y_val.shape[1]), curr_y_val, curr_patient_keys_val):
+                    pred_frame, _ = bladder_frame_finder.find_bladder_frame(DATA_DIR, data_dict[val_patient_key]['PT'])
+                    pruned_pred, results_dict = prune_pred(y_pred, results_dict, pred_frame)
+
                     # store in dict
                     curr_clf_dict["val"][val_patient_key] = {"pred": pruned_pred, "gt": y_val, "raw_preds": y_pred}
 
@@ -197,18 +226,10 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
 
                 # get predictions for each patient in the val set
                 all_y_preds = []
-                for idx, (X_val, y_val, val_patient_key) in enumerate(zip(curr_X_val, curr_y_val, curr_patient_keys_val)):
+                for X_val, y_val, val_patient_key in zip(curr_X_val, curr_y_val, curr_patient_keys_val):
                     y_pred = clf.predict(X_val)
-                    pruned_pred = np.zeros_like(y_pred)
-                    # prune y_pred, get the longest contiguous prediction of ones in y_pred, thank you https://stackoverflow.com/a/44392621
-                    c = count()
-                    try:
-                        longest_stretch_of_1s = max((list(g) for _, g in groupby(np.argwhere(y_pred == 1).flatten(),
-                                                                                 lambda x: x - next(c))), key=len)
-                        pruned_pred[longest_stretch_of_1s] = 1
-                    except ValueError:
-                        print("\033[91m" + "WARNING: FOUND A PATIENT WHICH WAS PREDICTED ALL 0s" + "\n\033[0m")
-                        results_dict["num_pred_all_zeros"] += 1
+                    pred_frame, _ = bladder_frame_finder.find_bladder_frame(DATA_DIR, data_dict[val_patient_key]['PT'])
+                    pruned_pred, results_dict = prune_pred(y_pred, results_dict, pred_frame)
 
                     all_y_preds.extend(pruned_pred)
                     # store in dict
@@ -241,9 +262,10 @@ def frame_classifier_trainer(dataset="image_dataset", save_results=True, run_nam
         print("     ", clf_name, np.mean(acc_arr))
 
     print("\033[91m\nNumber of patients which were predicted all 0s:", results_dict["num_pred_all_zeros"], "\n\033[0m")
+    print("\033[91m\nNumber of predictions which did not contain pred_frame:", results_dict["num_missed_pred_frame"], "\n\033[0m")
 
     # TODO: add inference on test data
 
 
 if __name__ == '__main__':
-    frame_classifier_trainer(dataset="image_dataset", save_results=False, run_name="")
+    frame_classifier_trainer(dataset="image_dataset", save_results=True, run_name="pred_frame_finder")

@@ -91,6 +91,34 @@ class EnsembleMeanMask:
         mask = sum([m.astype(int) for m in mask]) / len(mask)
         mask = np.round(mask).astype(int)
 
+        mask = scipy.ndimage.morphology.binary_fill_holes(mask)
+        if mask.sum() > 100:
+            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 30)
+        else:
+            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 10)
+
+        return mask
+
+
+class EnsembleMeanMaskPruned:
+    def __init__(self):
+        self.name = "Ensemble-Mean-Pruned"
+
+    @staticmethod
+    def compute_mask(img):
+        mask = [CannyMask.compute_mask(img),
+                SobelMask.compute_mask(img),
+                MarchSquaresMask.compute_mask(img)]
+
+        mask = sum([m.astype(int) for m in mask]) / len(mask)
+        mask = np.round(mask).astype(int)
+
+        mask = scipy.ndimage.morphology.binary_fill_holes(mask)
+        if mask.sum() > 100:
+            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 30)
+        else:
+            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 10)
+
         return mask
 
 

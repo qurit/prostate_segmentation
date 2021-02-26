@@ -1,1 +1,4 @@
 *dataset/*
+figs/*
+*.pk
+mask_predictions/*

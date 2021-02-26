@@ -114,10 +114,6 @@ class EnsembleMeanMaskPruned:
         mask = np.round(mask).astype(int)
 
         mask = scipy.ndimage.morphology.binary_fill_holes(mask)
-        if mask.sum() > 100:
-            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 30)
-        else:
-            mask = skimage.morphology.remove_small_objects(mask.astype(bool), 10)
 
         return mask
 

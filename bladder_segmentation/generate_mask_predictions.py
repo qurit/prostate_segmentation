@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.cm as cm
 from collections import Counter
-import scipy
 import skimage
 from skimage import measure
 
@@ -54,38 +53,36 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
         slice_axes = ["z"]
     check_axes = [a for a in slice_axes if a in ['x', 'y', 'z']]
     assert (len(check_axes) == len(slice_axes))
-    axis_label_map = {"z": ["x", "y"], "y": ["x", "z"], "x": ["z", "y"]}
 
     assert (bladder_frame_mode in ["all", "gt", "pred"])
 
     with open(os.path.join(DATA_DIR, dataset, 'global_dict.json')) as f:
         data_dict = json.load(f)
 
-    # dir where figs are saved
-    mask_dir = os.path.join(DATA_DIR, "mask_predictions")
-    if save_figs:
-        for axis in slice_axes:
-            figs_dir = os.path.join(mask_dir, axis)
-            if not os.path.isdir(figs_dir):
-                os.makedirs(figs_dir)
+    # dir where figs, histograms, and dict results are saved
+    mask_dir = os.path.join("bladder_segmentation", "experiments", run_name)
+    os.makedirs(mask_dir, exist_ok=True)
 
     # initialize dict to store experiments results
     results_dict = {}
 
     # specify which frames to consider from scan
-    if bladder_frame_mode in ["all", "pred"]:
+    if bladder_frame_mode == "all":
         frame_range = np.arange(0, FRAMES_PER_PATIENT)
 
     # if pred_dict is set then run edge detection on those patients otherwise get patients from dataset
     patient_keys = pred_dict.keys() if pred_dict else data_dict.keys()
 
-    # NOTE: ADD PARTICULAR PATIENT KEYS HERE
-    patient_keys = []  # ["PSMA-01-126", "PSMA-01-143", "PSMA-01-169"]
+    # NOTE: SPECIFY PARTICULAR PATIENT KEYS HERE
+    # patient_keys = []
 
     for patient in tqdm.tqdm(patient_keys):
         scan = data_dict[patient]['PT']
         rois = scan['rois']
         bladder = rois['Bladder']
+
+        if show_mask and save_figs:
+            os.makedirs(os.path.join(mask_dir, "mask_predictions", patient), exist_ok=True)
 
         if bladder_frame_mode == "gt":
             # get the ground truth first and last bladder frame indices
@@ -95,8 +92,9 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
             frame_range = bladder_frames_gt
 
         # get the predicted bladder frame range
-        if bladder_frame_mode == "pred":  # TODO: why not set frame range to this?
+        if bladder_frame_mode == "pred":
             bladder_frames_preds = pred_dict[patient]
+            frame_range = bladder_frames_preds
 
         # get all frame file paths in bladder range
         frame_fps = [os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm') for frame in frame_range]
@@ -164,26 +162,17 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
             # iterate over each algorithm and compute the 3d mask
             for alg_fn in algorithms:
                 alg_name = alg_fn().name
-                curr_mask_3d = [alg_fn.compute_mask(i) for i in img]
+                curr_mask_3d = np.asarray([alg_fn.compute_mask(i) for i in img])
 
-                # TODO volumetric pruning
                 if alg_name == "Ensemble-Mean-Pruned":
-                    labels = skimage.measure.label(np.asarray(curr_mask_3d))
+                    labels = skimage.measure.label(curr_mask_3d)
                     values, counts = np.unique(labels, return_counts=True)
-
-                    biggest_region = scipy.stats.mode(labels)
-
-                    values, counts = np.unique(curr_mask_3d, return_counts=True)
-                    mode = values[np.argmax(counts)]
-
-                    labels = skimage.measure.label(np.asarray(curr_mask_3d))
-                    biggest_region = scipy.stats.mode(labels)
-                    print(biggest_region)
-                    print(biggest_region[0])
-                    print(np.shape(biggest_region[0]))
-                    values, counts = np.unique(curr_mask_3d, return_counts=True)
-                    mode = values[np.argmax(counts)]
-                    curr_mask_3d = curr_mask_3d[labels == biggest_region[0]]
+                    # get most common label ignoring background
+                    mode = values[1:][np.argmax(counts[1:])]
+                    # set everything to 0 except for predicted bladder volume
+                    labels[labels != mode] = 0
+                    labels[labels == mode] = 1
+                    curr_mask_3d = labels
 
                 full_mask_3d = np.zeros_like(trans_img)
                 # find range of indices of center crop on full image size
@@ -205,13 +194,9 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     # swap z and x
                     full_mask_3d = np.swapaxes(full_mask_3d, 2, 0)
 
-                if bladder_frame_mode == "pred":
-                    # zero out frames which are not inside the predicted bladder frame range
-                    for idx in frame_range:
-                        if idx not in bladder_frames_preds:
-                            full_mask_3d[idx] *= 0
-
                 # compute dice score for the whole volume
+                # NOTE: remove this line to show ground truth overlap between bladder and tumor masks
+                ground_truth_3d[tumor_mask_3d == 1] = 0
                 dice = 0. if full_mask_3d.sum() == 0 else dice_score(ground_truth_3d, full_mask_3d)
                 # compute the overlap between bladder mask and tumor ground truth mask
                 tumor_pred_overlap = full_mask_3d[tumor_mask_3d == 1].sum()
@@ -224,7 +209,6 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                 patient_dict[alg_name] = full_mask_3d
 
         if len(slice_axes) > 1 and multiview_alg:
-            # TODO: try intersection
             masks = []
             # get the masks for the specified alg
             for a in slice_axes:
@@ -267,9 +251,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                 show_mask_algos = patient_dict.keys()
             size = len(show_mask_algos) + 2
             empty_mask_frames = [i for i, mask in enumerate(ground_truth_3d) if mask.sum() == 0]
-            fig_num = 0
-            x_label, y_label = axis_label_map["z"]
-            crop_size = (50, 50)
+            crop_size = (CROP_SIZE, CROP_SIZE)
 
             # configure color maps
             raw_img_cmap = "inferno"
@@ -285,7 +267,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
             pred_patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
 
             # iterate through each slice
-            for i, (slice_2d, gt_2d, tumor_2d) in enumerate(zip(orig_img_3d, ground_truth_3d, tumor_mask_3d)):
+            for i, (orig_img_2d, gt_2d, tumor_2d) in enumerate(zip(orig_img_3d, ground_truth_3d, tumor_mask_3d)):
                 # skip slices that contain no bladder
                 if i in empty_mask_frames:
                     continue
@@ -314,12 +296,13 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     gt_patches = [mpatches.Patch(color=list(cm.get_cmap(gt_cmap)(1.0)), label='Bladder')]
 
                 fig, axs = plt.subplots(int(np.ceil(size / 2)), 2, figsize=(10, max(10, round(len(show_mask_algos)/4 * 10))))
-                axs[0, 0].imshow(slice_2d, cmap=raw_img_cmap)
+                axs[0, 0].imshow(orig_img_2d, cmap=raw_img_cmap)
                 axs[0, 0].set_title('Original')
-                axs[0, 0].set_xlabel(x_label)
-                axs[0, 0].set_ylabel(y_label)
+                axs[0, 0].set_xlabel("x")
+                axs[0, 0].set_ylabel("y")
                 axs[0, 1].imshow(centre_crop(np.abs(gt_2d - tumor_2d/3), crop_size), cmap=gt_cmap, interpolation='none', alpha=1.0)
-                axs[0, 1].set_title('Ground Truth Mask\nGTSum: %.0f' % gt_2d.sum())
+                axs[0, 1].set_title('Ground Truth Mask\nGTSum: %.0f, B/ml: %.0f' % (gt_2d.sum(),
+                                                                                    orig_img_2d[gt_2d == 1].sum()))
                 axs[0, 1].legend(handles=gt_patches, loc=4)  # loc=1 for upper right
 
                 for idx, alg_name in enumerate(show_mask_algos):
@@ -328,20 +311,22 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     a = int(idx / 2)
                     b = int(idx % 2)
 
-                    slice_mask = patient_dict[alg_name][i]
-                    slice_dice = 0. if slice_mask.sum() == 0 else dice_score(gt_2d, slice_mask)
-                    title = "%s\nDice: %.04f, PredSum: %.0f" % (alg_name, slice_dice, slice_mask.sum())
-                    tumor_pred_overlap = slice_mask[tumor_2d == 1].sum()
+                    pred_mask_2d = patient_dict[alg_name][i]
+                    gt_2d[tumor_2d == 1] = 0
+                    slice_dice = 0. if pred_mask_2d.sum() == 0 else dice_score(gt_2d, pred_mask_2d)
+                    title = "%s Dice: %.04f\nPredSum: %.0f, B/ml: %.0f" % (alg_name, slice_dice, pred_mask_2d.sum(),
+                                                                           orig_img_2d[pred_mask_2d == 1].sum())
+                    tumor_pred_overlap = pred_mask_2d[tumor_2d == 1].sum()
                     if tumor_pred_overlap != 0:
-                        title += "\nTumor Pred Overlap = %.0f" % tumor_pred_overlap
+                        title += "\nTumor Pred Overlap: %.0f" % tumor_pred_overlap
 
                     axs[a, b].imshow(centre_crop(gt_2d, crop_size), cmap=gt_cmap, interpolation='none', alpha=1.0)
-                    axs[a, b].imshow(centre_crop(slice_mask, crop_size), cmap=pred_cmap, interpolation='none', alpha=0.5)
+                    axs[a, b].imshow(centre_crop(pred_mask_2d, crop_size), cmap=pred_cmap, interpolation='none', alpha=0.5)
                     axs[a, b].set_title(title)
                     axs[a, b].set_xticks([])
                     axs[a, b].set_yticks([])
 
-                fig.suptitle("Patient ID: %s\nOrder: %.0f, Depth axis: %s" % (patient, i, "z"))
+                fig.suptitle("%s Order: %.0f, Dice Score: %.04f" % (patient, i, results_dict[patient]["algos"][alg_name]["dice"]))
                 # add legend for the prediction masks
                 plt.legend(handles=pred_patches, loc=4)  # loc=1 for upper right
                 # adjust spacing
@@ -350,9 +335,8 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
 
                 if save_figs:
                     # save fig to disk
-                    fig.savefig(os.path.join(mask_dir, "z", patient + "-" + str(fig_num) + ".png"), format="png")
+                    fig.savefig(os.path.join(mask_dir, "mask_predictions", patient, str(i) + ".png"), format="png")
                     plt.close(fig)
-                    fig_num += 1
 
                 else:
                     plt.show()
@@ -361,14 +345,14 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
     print("\nDone iterating through patients...\n")
 
     # save results to disk
-    results_dict_fp = os.path.join(DATA_DIR, 'mask_prediction_results_dict_' + run_name + "_" + bladder_frame_mode + '.pk')
+    results_dict_fp = os.path.join(mask_dir, 'mask_prediction_results_dict' + "_" + bladder_frame_mode + '.pk')
 
-    # with open(results_dict_fp, 'wb') as handle:
-    #     pickle.dump(results_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    # print("Saved results to dict with file path: {}\n".format(results_dict_fp))
+    with open(results_dict_fp, 'wb') as handle:
+        pickle.dump(results_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    print("Saved results to dict with file path: {}\n".format(results_dict_fp))
 
     # NOTE: CAN LOAD RESULTS_DICT HERE
-    results_dict = pickle.load(open(results_dict_fp, 'rb'), encoding='bytes')
+    # results_dict = pickle.load(open(results_dict_fp, 'rb'), encoding='bytes')
     # NOTE: SPECIFY PARTICULAR ALGOS TO PLOT HERE
     # whitelist = []
 
@@ -428,13 +412,10 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
     print("\nBottom {} patients which achieved min scores across all algos:\n\tset: {} \n\tcount: {}"
           .format(bottom_n, list(Counter(list_min_patients).keys()), list(Counter(list_min_patients).values())))
 
-    # find the mean scores for the failure
-
     # plots histograms to visualize results
     if show_hist:
         # set threshold below which lower values will be part of the same bin
         min_threshold = 0.5
-        # TODO: add text which specifies number of scores below min_threshold
         # plot hist of dice scores averaged across scans
         figsize = (6, round(len(algos_dict)/4 * 9))
         fig1, axs1 = plt.subplots(len(algos_dict.keys()), figsize=figsize, sharex=True)
@@ -460,7 +441,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
         plt.subplots_adjust(top=0.80)
 
         if save_figs:
-            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist_" + run_name + "_" + bladder_frame_mode + ".png"), format="png")
+            fig1.savefig(os.path.join(mask_dir, "dice_scan_hist_" + bladder_frame_mode + ".png"), format="png")
         plt.show()
         plt.close('all')
 
@@ -482,10 +463,10 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
         plt.xlabel("Pixel sum")
         # adjust spacing
         plt.tight_layout()
-        plt.subplots_adjust(top=0.80)
+        plt.subplots_adjust(top=0.90)
 
         if save_figs:
-            fig2.savefig(os.path.join(mask_dir, "tumor_overlap_scan_hist_" + run_name + "_" + bladder_frame_mode + ".png"), format="png")
+            fig2.savefig(os.path.join(mask_dir, "tumor_overlap_scan_hist_" + bladder_frame_mode + ".png"), format="png")
         plt.show()
         plt.close('all')
 
@@ -506,36 +487,15 @@ if __name__ == '__main__':
             arr = np.where(arr != 0)[0]
             preds[patient] = arr
 
-    run_name = "full-run-test"
+    run_name = "full-run-on-val-set"
     # add arbitrary number of edge detection algorithms in the args
     generate_mask_predictions(CannyMask,
                               SobelMask,
                               MarchSquaresMask,
                               EnsembleMeanMask,
+                              EnsembleMeanMaskPruned,
                               dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name=run_name,
                               show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="pred", pred_dict=preds,
-                              show_mask_algos=None  # ["Ensemble-Mean-x", "Mean MultiView-xyz"]
+                              show_mask_algos=["Ensemble-Mean-Pruned-x", "Mean MultiView-xyz"],
+                              multiview_alg="Ensemble-Mean-Pruned"
                               )
-    exit()
-    generate_mask_predictions(CannyMask,
-                              SobelMask,
-                              MarchSquaresMask,
-                              EnsembleMeanMask,
-                              dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name=run_name,
-                              show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="gt", pred_dict=preds,
-                              show_mask_algos=None  # ["Ensemble-Mean-x", "Mean MultiView-xyz"]
-                              )
-
-    generate_mask_predictions(CannyMask,
-                              SobelMask,
-                              MarchSquaresMask,
-                              EnsembleMeanMask,
-                              dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name=run_name,
-                              show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="all", pred_dict=preds,
-                              show_mask_algos=None  # ["Ensemble-Mean-x", "Mean MultiView-xyz"]
-                              )
-
-
-# TODO: results on test set, need to do inference with models
-# TODO: volume pruning
-# TODO: fixup pred overlap hist

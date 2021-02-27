@@ -93,8 +93,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
 
         # get the predicted bladder frame range
         if bladder_frame_mode == "pred":
-            bladder_frames_preds = pred_dict[patient]
-            frame_range = bladder_frames_preds
+            frame_range = pred_dict[patient]
 
         # get all frame file paths in bladder range
         frame_fps = [os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm') for frame in frame_range]
@@ -194,6 +193,11 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     # swap z and x
                     full_mask_3d = np.swapaxes(full_mask_3d, 2, 0)
 
+                if alg_name == "Ensemble-Mean-Pruned":
+                    # do additional pruning
+                    full_mask_3d = [skimage.morphology.remove_small_objects(mask.astype(bool), 15) for mask in full_mask_3d]
+                    full_mask_3d = np.asarray([np.zeros_like(mask) if (np.sum(mask) < 15) else mask for mask in full_mask_3d])
+
                 # compute dice score for the whole volume
                 # NOTE: remove this line to show ground truth overlap between bladder and tumor masks
                 ground_truth_3d[tumor_mask_3d == 1] = 0
@@ -221,6 +225,9 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
             mv_mean_mask = (sum([m.astype(int) for m in masks]) + 0.00001) / len(masks)
             mv_mean_mask = np.round(mv_mean_mask).astype(int)
 
+            # pruning
+            mv_mean_mask = np.asarray([skimage.morphology.remove_small_objects(mask.astype(bool), 15) for mask in mv_mean_mask])
+
             # compute dice score for whole volume
             mv_mean_dice = 0. if mv_mean_mask.sum() == 0 else dice_score(ground_truth_3d, mv_mean_mask)
             # compute the overlap between bladder mask and tumor ground truth mask
@@ -231,26 +238,11 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                                                                 "pred_img_val_sums": orig_img_3d[mv_mean_mask == 1].sum()}
             patient_dict[mv_mean_alg_name] = mv_mean_mask
 
-            # do ensemble union across views
-            mv_union_alg_name = "Union MultiView-" + "".join(slice_axes)
-            mv_union_mask = sum([m.astype(int) for m in masks])
-            mv_union_mask[mv_union_mask > 1] = 1
-
-            # compute dice score for whole volume
-            mv_union_dice = 0. if mv_union_mask.sum() == 0 else dice_score(ground_truth_3d, mv_union_mask)
-            # compute the overlap between bladder mask and tumor ground truth mask
-            tumor_pred_overlap = mv_union_mask[tumor_mask_3d == 1].sum()
-
-            results_dict[patient]["algos"][mv_union_alg_name] = {"dice": mv_union_dice, "tumor_pred_overlap": tumor_pred_overlap,
-                                                                 "axis": slice_axes, "pred_mask_sum": mv_union_mask.sum(),
-                                                                 "pred_img_val_sums": orig_img_3d[mv_union_mask == 1].sum()}
-            patient_dict[mv_union_alg_name] = mv_union_mask
-
         if show_mask:
             if show_mask_algos is None:
                 show_mask_algos = patient_dict.keys()
             size = len(show_mask_algos) + 2
-            empty_mask_frames = [i for i, mask in enumerate(ground_truth_3d) if mask.sum() == 0]
+            # empty_mask_frames = [i for i, mask in enumerate(ground_truth_3d) if mask.sum() == 0]
             crop_size = (CROP_SIZE, CROP_SIZE)
 
             # configure color maps
@@ -269,14 +261,15 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
             # iterate through each slice
             for i, (orig_img_2d, gt_2d, tumor_2d) in enumerate(zip(orig_img_3d, ground_truth_3d, tumor_mask_3d)):
                 # skip slices that contain no bladder
-                if i in empty_mask_frames:
-                    continue
+                # if i in empty_mask_frames:
+                #     continue
 
                 # check for any gt tumor and bladder overlap
                 tumor_gt_overlap = gt_2d[tumor_2d == 1].sum()
 
                 # configure legend for ground truth mask
                 if tumor_gt_overlap != 0:
+                    # case where there is bladder, tumor, and overlap
                     cmap = {1: list(cm.get_cmap(gt_cmap)(1.0)),
                             2: list(cm.get_cmap(gt_cmap)(0.33)),
                             3: list(cm.get_cmap(gt_cmap)(0.66))}
@@ -285,13 +278,22 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     gt_patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
 
                 elif tumor_2d.sum() != 0:
-                    cmap = {1: list(cm.get_cmap(gt_cmap)(1.0)),
-                            2: list(cm.get_cmap(gt_cmap)(0.33))}
-                    labels = {1: 'Bladder', 2: 'Tumor'}
-                    # create patches as legend
-                    gt_patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
+                    if gt_2d.sum() == 0:
+                        # case where there is only tumor
+                        a = int(gt_2d.shape[0] / 2 - CROP_SIZE / 2)
+                        b = int(gt_2d.shape[1] / 2 - CROP_SIZE / 2)
+                        tumor_2d[a][b] += 3  # hack to keep tumor color consistent, puts a bright pixel at (0,0) of the image so it is minimally visible
+                        gt_patches = [mpatches.Patch(color=list(cm.get_cmap(gt_cmap)(0.33)), label='Tumor')]
+                    else:
+                        # case where there is both bladder and tumor
+                        cmap = {1: list(cm.get_cmap(gt_cmap)(1.0)),
+                                2: list(cm.get_cmap(gt_cmap)(0.33))}
+                        labels = {1: 'Bladder', 2: 'Tumor'}
+                        # create patches as legend
+                        gt_patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
 
                 else:
+                    # case where there is only bladder
                     # create patches as legend
                     gt_patches = [mpatches.Patch(color=list(cm.get_cmap(gt_cmap)(1.0)), label='Bladder')]
 
@@ -305,7 +307,9 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                                                                                     orig_img_2d[gt_2d == 1].sum()))
                 axs[0, 1].legend(handles=gt_patches, loc=4)  # loc=1 for upper right
 
+                dice_scores_title = ""
                 for idx, alg_name in enumerate(show_mask_algos):
+                    dice_scores_title += "%.04f " % (results_dict[patient]["algos"][alg_name]["dice"])
                     idx += 2
                     # convert to 2d indices
                     a = int(idx / 2)
@@ -326,7 +330,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     axs[a, b].set_xticks([])
                     axs[a, b].set_yticks([])
 
-                fig.suptitle("%s Order: %.0f, Dice Score: %.04f" % (patient, i, results_dict[patient]["algos"][alg_name]["dice"]))
+                fig.suptitle("%s Order: %.0f, Dice Scores: %s" % (patient, i + frame_range[0], dice_scores_title))
                 # add legend for the prediction masks
                 plt.legend(handles=pred_patches, loc=4)  # loc=1 for upper right
                 # adjust spacing
@@ -335,7 +339,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
 
                 if save_figs:
                     # save fig to disk
-                    fig.savefig(os.path.join(mask_dir, "mask_predictions", patient, str(i) + ".png"), format="png")
+                    fig.savefig(os.path.join(mask_dir, "mask_predictions", patient, str(i + frame_range[0]) + ".png"), format="png")
                     plt.close(fig)
 
                 else:
@@ -496,6 +500,6 @@ if __name__ == '__main__':
                               EnsembleMeanMaskPruned,
                               dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name=run_name,
                               show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="pred", pred_dict=preds,
-                              show_mask_algos=["Ensemble-Mean-Pruned-x", "Mean MultiView-xyz"],
+                              show_mask_algos=["Ensemble-Mean-Pruned-x", "Ensemble-Mean-Pruned-y", "Ensemble-Mean-Pruned-z", "Mean MultiView-xyz"],
                               multiview_alg="Ensemble-Mean-Pruned"
                               )

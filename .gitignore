@@ -5,6 +5,7 @@
 *.code-workspace
 *.zip
 *.pk
+*/experiments/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

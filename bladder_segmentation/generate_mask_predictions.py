@@ -10,6 +10,7 @@ import matplotlib.cm as cm
 from collections import Counter
 import skimage
 from skimage import measure
+import scipy
 
 from bladder_segmentation.masks import SobelMask, CannyMask, MarchSquaresMask, EnsembleMeanMask, EnsembleMeanMaskPruned
 from utils import contour2mask, centre_crop, dice_score
@@ -77,6 +78,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
     # patient_keys = []
 
     for patient in tqdm.tqdm(patient_keys):
+        print("\n######################\nPatient ID", patient)
         scan = data_dict[patient]['PT']
         rois = scan['rois']
         bladder = rois['Bladder']
@@ -84,16 +86,21 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
         if show_mask and save_figs:
             os.makedirs(os.path.join(mask_dir, "mask_predictions", patient), exist_ok=True)
 
+        # get the ground truth first and last bladder frame indices
+        bladder_frames_gt = np.asarray([frame for frame, contour in enumerate(bladder) if contour != []])
+        check_continuous = lambda l: sorted(l) == list(range(min(l), max(l) + 1))
+        assert check_continuous(bladder_frames_gt)
+
         if bladder_frame_mode == "gt":
-            # get the ground truth first and last bladder frame indices
-            bladder_frames_gt = [frame for frame, contour in enumerate(bladder) if contour != []]
-            check_continuous = lambda l: sorted(l) == list(range(min(l), max(l) + 1))
-            assert check_continuous(bladder_frames_gt)
             frame_range = bladder_frames_gt
 
-        # get the predicted bladder frame range
-        if bladder_frame_mode == "pred":
-            frame_range = pred_dict[patient]
+        elif bladder_frame_mode == "pred":
+            bladder_frames_preds = pred_dict[patient]
+            # get the union of the predicted frame range and gt frame range
+            frame_range = np.union1d(bladder_frames_preds, bladder_frames_gt).astype(int)
+            print("bladder_frames_gt:    {}\n"
+                  "bladder_frames_preds: {}\n"
+                  "frame_range:          {}\n".format(bladder_frames_gt, bladder_frames_preds, frame_range))
 
         # get all frame file paths in bladder range
         frame_fps = [os.path.join(DATA_DIR, scan['fp'], str(frame) + '.dcm') for frame in frame_range]
@@ -163,16 +170,6 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                 alg_name = alg_fn().name
                 curr_mask_3d = np.asarray([alg_fn.compute_mask(i) for i in img])
 
-                if alg_name == "Ensemble-Mean-Pruned":
-                    labels = skimage.measure.label(curr_mask_3d)
-                    values, counts = np.unique(labels, return_counts=True)
-                    # get most common label ignoring background
-                    mode = values[1:][np.argmax(counts[1:])]
-                    # set everything to 0 except for predicted bladder volume
-                    labels[labels != mode] = 0
-                    labels[labels == mode] = 1
-                    curr_mask_3d = labels
-
                 full_mask_3d = np.zeros_like(trans_img)
                 # find range of indices of center crop on full image size
                 b1 = int(trans_img_size[1] / 2 + crop_size[0] / 2)
@@ -193,10 +190,31 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     # swap z and x
                     full_mask_3d = np.swapaxes(full_mask_3d, 2, 0)
 
+                if bladder_frame_mode == "pred":
+                    # zero out frames which are not inside the predicted bladder frame range
+                    for idx in frame_range:
+                        if idx not in bladder_frames_preds:
+                            full_mask_3d[idx - frame_range[0]] *= 0
+
                 if alg_name == "Ensemble-Mean-Pruned":
+                    labels = skimage.measure.label(full_mask_3d)
+                    values, counts = np.unique(labels, return_counts=True)
+                    # get most common label ignoring background
+                    mode = values[1:][np.argmax(counts[1:])]
+                    # set everything to 0 except for predicted bladder volume
+                    labels[labels != mode] = 0
+                    labels[labels == mode] = 1
+                    full_mask_3d = labels
+
                     # do additional pruning
-                    full_mask_3d = [skimage.morphology.remove_small_objects(mask.astype(bool), 15) for mask in full_mask_3d]
-                    full_mask_3d = np.asarray([np.zeros_like(mask) if (np.sum(mask) < 15) else mask for mask in full_mask_3d])
+                    mask = []
+                    for m in full_mask_3d:
+                        m = scipy.ndimage.morphology.binary_fill_holes(m)
+                        m = skimage.morphology.remove_small_objects(m.astype(bool), 15)
+                        if np.sum(m) < 15:
+                            m = np.zeros_like(m)
+                        mask.append(m)
+                    full_mask_3d = np.asarray(mask)
 
                 # compute dice score for the whole volume
                 # NOTE: remove this line to show ground truth overlap between bladder and tumor masks
@@ -242,7 +260,6 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
             if show_mask_algos is None:
                 show_mask_algos = patient_dict.keys()
             size = len(show_mask_algos) + 2
-            # empty_mask_frames = [i for i, mask in enumerate(ground_truth_3d) if mask.sum() == 0]
             crop_size = (CROP_SIZE, CROP_SIZE)
 
             # configure color maps
@@ -260,9 +277,8 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
 
             # iterate through each slice
             for i, (orig_img_2d, gt_2d, tumor_2d) in enumerate(zip(orig_img_3d, ground_truth_3d, tumor_mask_3d)):
-                # skip slices that contain no bladder
-                # if i in empty_mask_frames:
-                #     continue
+                # compute absolute index in scan
+                abs_idx = i + frame_range[0]
 
                 # check for any gt tumor and bladder overlap
                 tumor_gt_overlap = gt_2d[tumor_2d == 1].sum()
@@ -330,7 +346,15 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     axs[a, b].set_xticks([])
                     axs[a, b].set_yticks([])
 
-                fig.suptitle("%s Order: %.0f, Dice Scores: %s" % (patient, i + frame_range[0], dice_scores_title))
+                fig.suptitle("%s Order: %.0f, Dice Scores: %s" % (patient, abs_idx, dice_scores_title))
+                # add a text indicator if classifier misclassified frame
+                if abs_idx not in bladder_frames_gt:
+                    # False Positive case
+                    fig.text(0.5, 0.94, "(False Positive frame)", ha="center", va="bottom", size="medium", color="red")
+                elif abs_idx not in bladder_frames_preds:
+                    # False Negative case
+                    fig.text(0.5, 0.94, "(False Negative frame)", ha="center", va="bottom", size="medium", color="red")
+
                 # add legend for the prediction masks
                 plt.legend(handles=pred_patches, loc=4)  # loc=1 for upper right
                 # adjust spacing
@@ -339,7 +363,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
 
                 if save_figs:
                     # save fig to disk
-                    fig.savefig(os.path.join(mask_dir, "mask_predictions", patient, str(i + frame_range[0]) + ".png"), format="png")
+                    fig.savefig(os.path.join(mask_dir, "mask_predictions", patient, str(abs_idx) + ".png"), format="png")
                     plt.close(fig)
 
                 else:
@@ -411,7 +435,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                       np.mean(algos_dict[alg_name]["tumor_pred_overlap"])))
 
     # print the set of max and min patients across all algos
-    print("\nUpper {} patients which achieved min scores across all algos:\n\tset: {} \n\tcount: {}"
+    print("\nUpper {} patients which achieved max scores across all algos:\n\tset: {} \n\tcount: {}"
           .format(upper_n, list(Counter(list_max_patients).keys()), list(Counter(list_max_patients).values())))
     print("\nBottom {} patients which achieved min scores across all algos:\n\tset: {} \n\tcount: {}"
           .format(bottom_n, list(Counter(list_min_patients).keys()), list(Counter(list_min_patients).values())))

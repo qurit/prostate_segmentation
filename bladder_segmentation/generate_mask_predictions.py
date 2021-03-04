@@ -17,21 +17,21 @@ from utils import contour2mask, centre_crop, dice_score
 from dicom_code.contour_utils import parse_dicom_image
 
 DATA_DIR = 'data'
-FRAMES_PER_PATIENT = 100  # TODO: make adaptive
-CROP_SIZE = 100
+CROP_SIZE = 100  # Size of the center crop on each frame to feed as input to the edge detection algorithms (reduces computation)
 
 
 def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=False, show_mask_algos=None,
                               show_hist=False, save_figs=False, slice_axes=None, multiview_alg="Ensemble-Mean",
-                              bladder_frame_mode="gt", pred_dict=None, run_name=""):
+                              bladder_frame_mode="pred", pred_dict=None, run_name=""):
     """
     Mask prediction step for the bladder segmentation pipeline. Will compute masks for all edge detection algorithms
     specified in the *algorithms arg.
 
-    The following are the 3 modes specified by 'bladder_frame_mode' arg:
-        1. Run edge detection on all frames part of the specified frame range 0,...,FRAMES_PER_PATIENT
-        2. Run edge detection on all frames part of the ground truth bladder frame range
-        3. Run edge detection on all frames, then zero-out frames not part of the predicted bladder frame range
+    The following are the 2 modes specified by 'bladder_frame_mode' arg:
+        1. "pred" - Run edge detection on the union of the predicted and ground truth bladder frame range, then zero-out frames
+           not part of the predicted bladder frame range (we run on union to visualize the false positive and false
+           negative frames)
+        2. "gt" - Run edge detection on all frames part of the ground truth bladder frame range
 
     Args:
         *algorithms: Variable-length argument list for the specified edge detection algorithms
@@ -42,8 +42,8 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
         show_mask_algos: List of algorithms to include in the mask plots, if None then show all
         show_hist: Option to show the histogram of dice scores across all scans
         save_figs: Option to save the outputted figures
-        run_name: Option to give a name to the mask prediction run which will add a suffix to the saved dice hist plot
-        bladder_frame_mode: Specifies the mode "all" (1), "gt" (2), or "pred" (3) Default is "gt"
+        run_name: Name of the mask prediction run and directory name where script outputs are stored
+        bladder_frame_mode: Specifies the mode "pred" (1), or "gt" (2) Default is "pred"
         pred_dict: Specifies subset of patients to run edge detection and predictions of bladder frame range
                    dict structure is the following: {"patient-key": [list of frame indices containing bladder"}
 
@@ -55,7 +55,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
     check_axes = [a for a in slice_axes if a in ['x', 'y', 'z']]
     assert (len(check_axes) == len(slice_axes))
 
-    assert (bladder_frame_mode in ["all", "gt", "pred"])
+    assert (bladder_frame_mode in ["gt", "pred"])
 
     with open(os.path.join(DATA_DIR, dataset, 'global_dict.json')) as f:
         data_dict = json.load(f)
@@ -66,10 +66,6 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
 
     # initialize dict to store experiments results
     results_dict = {}
-
-    # specify which frames to consider from scan
-    if bladder_frame_mode == "all":
-        frame_range = np.arange(0, FRAMES_PER_PATIENT)
 
     # if pred_dict is set then run edge detection on those patients otherwise get patients from dataset
     patient_keys = pred_dict.keys() if pred_dict else data_dict.keys()
@@ -313,7 +309,12 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                     # create patches as legend
                     gt_patches = [mpatches.Patch(color=list(cm.get_cmap(gt_cmap)(1.0)), label='Bladder')]
 
-                fig, axs = plt.subplots(int(np.ceil(size / 2)), 2, figsize=(10, max(10, round(len(show_mask_algos)/4 * 10))))
+                # if only 1 alg make plot 1x3, otherwise make it two columns with as many rows required
+                if len(show_mask_algos) == 1:
+                    fig, axs = plt.subplots(1, 3, figsize=(10, 5))
+                    axs = np.expand_dims(axs, axis=0)
+                else:
+                    fig, axs = plt.subplots(int(np.ceil(size / 2)), 2, figsize=(10, max(10, round(len(show_mask_algos)/4 * 10))))
                 axs[0, 0].imshow(orig_img_2d, cmap=raw_img_cmap)
                 axs[0, 0].set_title('Original')
                 axs[0, 0].set_xlabel("x")
@@ -327,9 +328,13 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                 for idx, alg_name in enumerate(show_mask_algos):
                     dice_scores_title += "%.04f " % (results_dict[patient]["algos"][alg_name]["dice"])
                     idx += 2
-                    # convert to 2d indices
-                    a = int(idx / 2)
-                    b = int(idx % 2)
+
+                    if len(show_mask_algos) == 1:
+                        a, b = 0, 2
+                    else:
+                        # convert to 2d indices
+                        a = int(idx / 2)
+                        b = int(idx % 2)
 
                     pred_mask_2d = patient_dict[alg_name][i]
                     gt_2d[tumor_2d == 1] = 0
@@ -350,10 +355,10 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
                 # add a text indicator if classifier misclassified frame
                 if abs_idx not in bladder_frames_gt:
                     # False Positive case
-                    fig.text(0.5, 0.94, "(False Positive frame)", ha="center", va="bottom", size="medium", color="red")
+                    fig.text(0.5, 0.925, "(False Positive frame)", ha="center", va="bottom", size="medium", color="red")
                 elif abs_idx not in bladder_frames_preds:
                     # False Negative case
-                    fig.text(0.5, 0.94, "(False Negative frame)", ha="center", va="bottom", size="medium", color="red")
+                    fig.text(0.5, 0.925, "(False Negative frame)", ha="center", va="bottom", size="medium", color="red")
 
                 # add legend for the prediction masks
                 plt.legend(handles=pred_patches, loc=4)  # loc=1 for upper right
@@ -500,30 +505,38 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
 
 
 if __name__ == '__main__':
-    # get predictions on validation set
-    classifier_results = pickle.load(open("results_dict_pred_frame_finder_50x50.pk", 'rb'), encoding='bytes')
+    # get predictions from running inference
+    model_dir = os.path.join("bladder_segmentation/experiments/models/run-cross-val-test-1/predictions_test_dataset.pk")
+    preds = pickle.load(open(model_dir, 'rb'), encoding='bytes')
+    preds = {p: np.where(preds[p] != 0)[0] for p in preds}
+    print(preds)
+
+    # code for loading up predictions on each val set from the 5-Fold CV
+    # classifier_results = pickle.load(open("results_dict_pred_frame_finder_50x50.pk", 'rb'), encoding='bytes')
+    #
     # specify classifier
-    clf = 'svc-rbf'
-    # get model predictions
-    model_dict = classifier_results['clf'][clf]
+    # clf = 'svc-rbf'
+    # # get model predictions
+    # model_dict = classifier_results['clf'][clf]
+    #
+    # # iterate through each fold and get the corresponding patients keys and predictions
+    # preds = {}
+    # for fold in model_dict.keys():
+    #     for patient in model_dict[fold]['val']:
+    #         arr = model_dict[fold]['val'][patient]['pred']
+    #         arr = np.where(arr != 0)[0]
+    #         preds[patient] = arr
 
-    # iterate through each fold and get the corresponding patients keys and predictions
-    preds = {}
-    for fold in model_dict.keys():
-        for patient in model_dict[fold]['val']:
-            arr = model_dict[fold]['val'][patient]['pred']
-            arr = np.where(arr != 0)[0]
-            preds[patient] = arr
-
-    run_name = "full-run-on-val-set"
+    run_name = "test-dataset-edge-det-1"
     # add arbitrary number of edge detection algorithms in the args
-    generate_mask_predictions(CannyMask,
-                              SobelMask,
-                              MarchSquaresMask,
-                              EnsembleMeanMask,
+    generate_mask_predictions(
                               EnsembleMeanMaskPruned,
-                              dataset="image_dataset", slice_axes=['x', 'y', 'z'], run_name=run_name,
-                              show_mask=False, show_hist=True, save_figs=True, bladder_frame_mode="pred", pred_dict=preds,
-                              show_mask_algos=["Ensemble-Mean-Pruned-x", "Ensemble-Mean-Pruned-y", "Ensemble-Mean-Pruned-z", "Mean MultiView-xyz"],
+                              dataset="test_dataset", slice_axes=['x', 'y', 'z'], run_name=run_name,
+                              show_mask=True, show_hist=True, save_figs=True, bladder_frame_mode="pred", pred_dict=preds,
+                              show_mask_algos=["Ensemble-Mean-Pruned-x"],
                               multiview_alg="Ensemble-Mean-Pruned"
                               )
+
+# TODO:
+# - need a better metric for tumor pred overlap, maybe just compute mean for patients that do have overlap
+# - extract viz code

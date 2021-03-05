@@ -5,13 +5,12 @@ import pickle
 import numpy as np
 import pydicom as dicom
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import matplotlib.cm as cm
 from collections import Counter
 import skimage
 from skimage import measure
 import scipy
 
+from bladder_segmentation.mask_visualizer import MaskVisualizer
 from bladder_segmentation.masks import SobelMask, CannyMask, MarchSquaresMask, EnsembleMeanMask, EnsembleMeanMaskPruned
 from utils import contour2mask, centre_crop, dice_score
 from dicom_code.contour_utils import parse_dicom_image
@@ -64,6 +63,15 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
     mask_dir = os.path.join("bladder_segmentation", "experiments", run_name)
     os.makedirs(mask_dir, exist_ok=True)
 
+    if show_mask:
+        # if none specified just include all
+        if show_mask_algos is None:
+            show_mask_algos = [alg().name + "-" + ax for alg in algorithms for ax in slice_axes]
+
+        plot_dir = os.path.join(mask_dir, "mask_predictions")
+        # init mask visualizer object
+        mask_visualizer = MaskVisualizer(show_mask_algos, root_plot_dir=plot_dir, save_figs=save_figs)
+
     # initialize dict to store experiments results
     results_dict = {}
 
@@ -80,7 +88,7 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
         bladder = rois['Bladder']
 
         if show_mask and save_figs:
-            os.makedirs(os.path.join(mask_dir, "mask_predictions", patient), exist_ok=True)
+            os.makedirs(os.path.join(plot_dir, patient), exist_ok=True)
 
         # get the ground truth first and last bladder frame indices
         bladder_frames_gt = np.asarray([frame for frame, contour in enumerate(bladder) if contour != []])
@@ -253,127 +261,13 @@ def generate_mask_predictions(*algorithms, dataset="image_dataset", show_mask=Fa
             patient_dict[mv_mean_alg_name] = mv_mean_mask
 
         if show_mask:
-            if show_mask_algos is None:
-                show_mask_algos = patient_dict.keys()
-            size = len(show_mask_algos) + 2
-            crop_size = (CROP_SIZE, CROP_SIZE)
+            # make a list with dice scores for show mask algos
+            show_mask_algos_dice = [results_dict[patient]["algos"][alg_name]["dice"] for alg_name in show_mask_algos]
 
-            # configure color maps
-            raw_img_cmap = "inferno"
-            gt_cmap = "OrRd"
-            pred_cmap = "Greens"
-
-            # configure legend for predictions
-            cmap = {1: [*np.asarray([62, 33, 10])/255, 1.0],
-                    2: [*np.asarray([129, 158, 131])/255, 1.0],
-                    3: [*np.asarray([251, 249, 241])/255, 1.],
-                    4: [*np.asarray([184, 126, 120]) / 255, 1.0]}
-            labels = {1: 'TP', 2: 'FP', 3: 'TN', 4: 'FN'}
-            pred_patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
-
-            # iterate through each slice
-            for i, (orig_img_2d, gt_2d, tumor_2d) in enumerate(zip(orig_img_3d, ground_truth_3d, tumor_mask_3d)):
-                # compute absolute index in scan
-                abs_idx = i + frame_range[0]
-
-                # check for any gt tumor and bladder overlap
-                tumor_gt_overlap = gt_2d[tumor_2d == 1].sum()
-
-                # configure legend for ground truth mask
-                if tumor_gt_overlap != 0:
-                    # case where there is bladder, tumor, and overlap
-                    cmap = {1: list(cm.get_cmap(gt_cmap)(1.0)),
-                            2: list(cm.get_cmap(gt_cmap)(0.33)),
-                            3: list(cm.get_cmap(gt_cmap)(0.66))}
-                    labels = {1: 'Bladder', 2: 'Tumor', 3: 'Overlap'}
-                    # create patches as legend
-                    gt_patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
-
-                elif tumor_2d.sum() != 0:
-                    if gt_2d.sum() == 0:
-                        # case where there is only tumor
-                        a = int(gt_2d.shape[0] / 2 - CROP_SIZE / 2)
-                        b = int(gt_2d.shape[1] / 2 - CROP_SIZE / 2)
-                        tumor_2d[a][b] += 3  # hack to keep tumor color consistent, puts a bright pixel at (0,0) of the image so it is minimally visible
-                        gt_patches = [mpatches.Patch(color=list(cm.get_cmap(gt_cmap)(0.33)), label='Tumor')]
-                    else:
-                        # case where there is both bladder and tumor
-                        cmap = {1: list(cm.get_cmap(gt_cmap)(1.0)),
-                                2: list(cm.get_cmap(gt_cmap)(0.33))}
-                        labels = {1: 'Bladder', 2: 'Tumor'}
-                        # create patches as legend
-                        gt_patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
-
-                else:
-                    # case where there is only bladder
-                    # create patches as legend
-                    gt_patches = [mpatches.Patch(color=list(cm.get_cmap(gt_cmap)(1.0)), label='Bladder')]
-
-                # if only 1 alg make plot 1x3, otherwise make it two columns with as many rows required
-                if len(show_mask_algos) == 1:
-                    fig, axs = plt.subplots(1, 3, figsize=(10, 5))
-                    axs = np.expand_dims(axs, axis=0)
-                else:
-                    fig, axs = plt.subplots(int(np.ceil(size / 2)), 2, figsize=(10, max(10, round(len(show_mask_algos)/4 * 10))))
-                axs[0, 0].imshow(orig_img_2d, cmap=raw_img_cmap)
-                axs[0, 0].set_title('Original')
-                axs[0, 0].set_xlabel("x")
-                axs[0, 0].set_ylabel("y")
-                axs[0, 1].imshow(centre_crop(np.abs(gt_2d - tumor_2d/3), crop_size), cmap=gt_cmap, interpolation='none', alpha=1.0)
-                axs[0, 1].set_title('Ground Truth Mask\nGTSum: %.0f, B/ml: %.0f' % (gt_2d.sum(),
-                                                                                    orig_img_2d[gt_2d == 1].sum()))
-                axs[0, 1].legend(handles=gt_patches, loc=4)  # loc=1 for upper right
-
-                dice_scores_title = ""
-                for idx, alg_name in enumerate(show_mask_algos):
-                    dice_scores_title += "%.04f " % (results_dict[patient]["algos"][alg_name]["dice"])
-                    idx += 2
-
-                    if len(show_mask_algos) == 1:
-                        a, b = 0, 2
-                    else:
-                        # convert to 2d indices
-                        a = int(idx / 2)
-                        b = int(idx % 2)
-
-                    pred_mask_2d = patient_dict[alg_name][i]
-                    gt_2d[tumor_2d == 1] = 0
-                    slice_dice = 0. if pred_mask_2d.sum() == 0 else dice_score(gt_2d, pred_mask_2d)
-                    title = "%s Dice: %.04f\nPredSum: %.0f, B/ml: %.0f" % (alg_name, slice_dice, pred_mask_2d.sum(),
-                                                                           orig_img_2d[pred_mask_2d == 1].sum())
-                    tumor_pred_overlap = pred_mask_2d[tumor_2d == 1].sum()
-                    if tumor_pred_overlap != 0:
-                        title += "\nTumor Pred Overlap: %.0f" % tumor_pred_overlap
-
-                    axs[a, b].imshow(centre_crop(gt_2d, crop_size), cmap=gt_cmap, interpolation='none', alpha=1.0)
-                    axs[a, b].imshow(centre_crop(pred_mask_2d, crop_size), cmap=pred_cmap, interpolation='none', alpha=0.5)
-                    axs[a, b].set_title(title)
-                    axs[a, b].set_xticks([])
-                    axs[a, b].set_yticks([])
-
-                fig.suptitle("%s Order: %.0f, Dice Scores: %s" % (patient, abs_idx, dice_scores_title))
-                # add a text indicator if classifier misclassified frame
-                if abs_idx not in bladder_frames_gt:
-                    # False Positive case
-                    fig.text(0.5, 0.925, "(False Positive frame)", ha="center", va="bottom", size="medium", color="red")
-                elif abs_idx not in bladder_frames_preds:
-                    # False Negative case
-                    fig.text(0.5, 0.925, "(False Negative frame)", ha="center", va="bottom", size="medium", color="red")
-
-                # add legend for the prediction masks
-                plt.legend(handles=pred_patches, loc=4)  # loc=1 for upper right
-                # adjust spacing
-                plt.tight_layout()
-                plt.subplots_adjust(top=0.90)
-
-                if save_figs:
-                    # save fig to disk
-                    fig.savefig(os.path.join(mask_dir, "mask_predictions", patient, str(abs_idx) + ".png"), format="png")
-                    plt.close(fig)
-
-                else:
-                    plt.show()
-                    plt.close('all')
+            # run mask visualizer
+            mask_visualizer.plot_mask_predictions(patient, bladder_frames_preds, bladder_frames_gt,
+                                                  orig_img_3d, ground_truth_3d, tumor_mask_3d,
+                                                  patient_dict, show_mask_algos_dice)
 
     print("\nDone iterating through patients...\n")
 
@@ -539,4 +433,3 @@ if __name__ == '__main__':
 
 # TODO:
 # - need a better metric for tumor pred overlap, maybe just compute mean for patients that do have overlap
-# - extract viz code

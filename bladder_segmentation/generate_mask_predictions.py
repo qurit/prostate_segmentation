@@ -12,7 +12,7 @@ import scipy
 
 from bladder_segmentation.mask_visualizer import MaskVisualizer
 from bladder_segmentation.masks import SobelMask, CannyMask, MarchSquaresMask, EnsembleMeanMask, EnsembleMeanMaskPruned
-from utils import contour2mask, centre_crop, dice_score
+from im_utils import contour2mask, centre_crop, dice_score
 from dicom_code.contour_utils import parse_dicom_image
 
 DATA_DIR = 'data'

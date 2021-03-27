@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import KFold
 
-from utils import centre_crop
+from im_utils import centre_crop
 from dicom_code.contour_utils import parse_dicom_image
 from bladder_segmentation.pred_frame_finder import BladderFrameFinder
 

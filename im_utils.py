@@ -1,4 +1,5 @@
 import scipy
+from scipy import ndimage
 import operator
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,7 +30,7 @@ def contour2mask(contours, size, xy_ordering=True):
         else:
             # case for polygon coordinates being (row, column)
             mask[poly[:, 0], poly[:, 1]] = 1
-    mask = scipy.ndimage.morphology.binary_fill_holes(mask)
+    mask = ndimage.morphology.binary_fill_holes(mask)
     return mask
 
 

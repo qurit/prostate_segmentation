@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import List
 
-from utils import centre_crop, dice_score
+from im_utils import centre_crop, dice_score
 
 
 class MaskVisualizer:

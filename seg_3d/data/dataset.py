@@ -17,7 +17,7 @@ from torchvision.transforms import functional as F
 from typing import Callable
 
 from dicom_code.contour_utils import parse_dicom_image
-from utils import contour2mask
+from im_utils import contour2mask
 
 
 def to_long_tensor(pic):
@@ -147,8 +147,8 @@ class ImageToImage3D(Dataset):
         if patient_keys is None:
             self.patient_keys = self.dataset_dict.keys()
 
-        self.all_frame_fps = {patient: glob.glob("data/" + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
-                              for patient in self.patient_keys}
+        self.all_frame_fps = {patient: glob.glob(patient_data[self.modality]['fp']+'/*.dcm') for patient,
+                                                                             patient_data in self.dataset_dict.items()}
 
         if joint_transform:
             self.joint_transform = joint_transform
@@ -161,7 +161,7 @@ class ImageToImage3D(Dataset):
 
     def __getitem__(self, idx):
         patient = list(self.patient_keys)[idx]
-        frame_fps = self.all_frame_fps[patient]
+        frame_fps = sorted(self.all_frame_fps[patient], key=lambda x: int(os.path.basename(x).split('.')[0]))
 
         # read image
         image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps])

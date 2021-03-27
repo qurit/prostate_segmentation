@@ -3,7 +3,7 @@ import scipy
 import skimage
 from skimage import feature, measure, segmentation
 
-from im_utils import contour2mask
+from utils import contour2mask
 
 
 class SobelMask:

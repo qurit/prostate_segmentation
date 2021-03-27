@@ -4,7 +4,7 @@ import scipy
 import pydicom
 from scipy.signal import savgol_filter
 
-from im_utils import centre_crop
+from utils import centre_crop
 from dicom_code.contour_utils import parse_dicom_image
 
 

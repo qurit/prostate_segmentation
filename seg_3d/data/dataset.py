@@ -17,7 +17,7 @@ from torchvision.transforms import functional as F
 from typing import Callable
 
 from dicom_code.contour_utils import parse_dicom_image
-from im_utils import contour2mask
+from utils import contour2mask
 
 
 def to_long_tensor(pic):

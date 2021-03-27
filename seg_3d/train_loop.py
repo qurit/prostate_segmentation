@@ -1,20 +1,26 @@
 import os
+import random
 import logging
 import numpy as np
+from time import time
 
+from seg_3d import losses
 from seg_3d.data.dataset import ImageToImage3D
 from seg_3d.config import get_cfg
-import seg_3d.modeling.backbone.unet
+import seg_3d.modeling.backbone.backbones
 import seg_3d.modeling.meta_arch.segnet
 
+import torch
 from torch.utils.data import DataLoader
+from detectron2.utils.file_io import PathManager
+from detectron2.utils.collect_env import collect_env_info
 from detectron2.modeling import build_model
 from detectron2.solver import build_lr_scheduler, build_optimizer
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from detectron2.utils.logger import setup_logger
 
-setup_logger()
+
 logger = logging.getLogger("detectron2")
 
 
@@ -25,13 +31,13 @@ logger = logging.getLogger("detectron2")
 # - implementation for eval
 # - plot loss
 # - distributed training
-# - seed all
 # - use wandb and sacred
 # - early stopping
 def setup_config():
     cfg = get_cfg()
 
     cfg.MODEL.DEVICE = "cpu"
+    cfg.SEED = 99
 
     # pipeline modes
     cfg.EVAL_ONLY = False
@@ -50,6 +56,9 @@ def setup_config():
     # model architecture
     cfg.MODEL.META_ARCHITECTURE = "SemanticSegNet"
     cfg.MODEL.BACKBONE.NAME = "build_unet3d_backbone"
+
+    # loss
+    cfg.LOSS = "BCEDiceLoss"  # available loss functions are inside losses.py
 
     # solver params
     cfg.SOLVER.BASE_LR = 0.001
@@ -76,6 +85,10 @@ def train(cfg, model):
     optimizer = build_optimizer(cfg, model)
     scheduler = build_lr_scheduler(cfg, optimizer)
 
+    # init loss criterion
+    loss = losses.get_loss_criterion(cfg)(alpha=1.0, beta=0.0)
+    logger.info("Loss:\n{}".format(loss))
+
     # init checkpointers
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
     start_iter = 0
@@ -87,6 +100,8 @@ def train(cfg, model):
                JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json")),
                TensorboardXWriter(cfg.OUTPUT_DIR)]
 
+    # measuring the time elapsed
+    train_start = time()
     logger.info("Starting training from iteration {}".format(start_iter))
 
     with EventStorage(start_iter) as storage:
@@ -95,17 +110,17 @@ def train(cfg, model):
                                              DataLoader(dataset, batch_size=1, shuffle=False)):
             storage.step()
 
-            # do a forward pass
-            # preds = model(batched_inputs["image"])  # FIXME
+            # do a forward pass, input is of shape (b, c, d, h, w)
+            preds = model(batched_inputs["image"].unsqueeze(0).float())
 
-            # optimizer.zero_grad()
-            # training_loss = self.loss(y_out, y_batch)
-            # training_loss.backward()
-            # optimizer.step()
+            optimizer.zero_grad()
+            training_loss = loss(preds, batched_inputs["gt_mask"])  # https://github.com/wolny/pytorch-3dunet#training-tips
+            training_loss.backward()
+            optimizer.step()
 
-            # storage.put_scalars(total_loss=losses_reduced)
-            # storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
-            # scheduler.step()
+            storage.put_scalars(total_loss=training_loss)
+            storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
+            scheduler.step()
 
             # print out info about iteration
             for writer in writers:
@@ -113,7 +128,28 @@ def train(cfg, model):
             periodic_checkpointer.step(iteration)
 
 
+def seed_all(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True  # may result in a slowdown if set to True
+
+
 def run(cfg):
+    # setup logging
+    setup_logger(output=cfg.OUTPUT_DIR)
+    logger.info("Environment info:\n" + collect_env_info())
+
+    path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
+    with PathManager.open(path, "w") as f:
+        f.write(cfg.dump())
+    logger.info("Full config saved to {}".format(path))
+
+    # make training deterministic
+    seed_all(cfg.SEED)
+
     # get model and load onto device
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))

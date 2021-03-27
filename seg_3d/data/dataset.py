@@ -1,3 +1,4 @@
+# original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/dataset.py
 import os
 import json
 import glob
@@ -152,8 +153,8 @@ class ImageToImage3D(Dataset):
         if joint_transform:
             self.joint_transform = joint_transform
         else:
-            to_tensor = T.ToTensor()
-            self.joint_transform = lambda x, y: (to_tensor(x), to_tensor(y))
+            # to_tensor = T.ToTensor()
+            self.joint_transform = lambda x, y: (torch.from_numpy(x), torch.from_numpy(y))
 
     def __len__(self):
         return len(self.patient_keys)

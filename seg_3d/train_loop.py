@@ -36,7 +36,7 @@ logger = logging.getLogger("detectron2")
 def setup_config():
     cfg = get_cfg()
 
-    cfg.MODEL.DEVICE = "cpu"
+    cfg.MODEL.DEVICE = "cuda:0"
     cfg.SEED = 99
 
     # pipeline modes
@@ -46,7 +46,7 @@ def setup_config():
     cfg.EARLY_STOPPING.PATIENCE = 10
 
     # paths
-    cfg.DATASET_PATH = "data/image_dataset"
+    cfg.DATASET_PATH = "/home/yous/Desktop/ryt/image_dataset"
     cfg.OUTPUT_DIR = "seg_3d/output/test-1"
 
     # dataset options
@@ -108,13 +108,17 @@ def train(cfg, model):
         # start main training loop
         for iteration, batched_inputs in zip(range(start_iter, max_iter),
                                              DataLoader(dataset, batch_size=1, shuffle=False)):
+
             storage.step()
+            sample = batched_inputs["image"].unsqueeze(0).float()
+            labels = batched_inputs["gt_mask"].float().to(cfg.MODEL.DEVICE)
 
             # do a forward pass, input is of shape (b, c, d, h, w)
-            preds = model(batched_inputs["image"].unsqueeze(0).float())
+            preds = model(sample).squeeze(0)
 
             optimizer.zero_grad()
-            training_loss = loss(preds, batched_inputs["gt_mask"])  # https://github.com/wolny/pytorch-3dunet#training-tips
+            training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+            print(training_loss)
             training_loss.backward()
             optimizer.step()
 
@@ -133,7 +137,7 @@ def seed_all(seed):
     random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True  # may result in a slowdown if set to True
 
 

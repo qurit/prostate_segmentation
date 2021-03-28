@@ -17,7 +17,7 @@ from torchvision.transforms import functional as F
 from typing import Callable
 
 from dicom_code.contour_utils import parse_dicom_image
-from utils import contour2mask
+from utils import contour2mask, centre_crop
 
 
 def to_long_tensor(pic):
@@ -171,6 +171,9 @@ class ImageToImage3D(Dataset):
 
         # correct dimensions if needed
         # image, mask = correct_dims(image, mask)
+
+        image = np.asarray([centre_crop(img, (100, 100)) for img in list(image)])
+        mask = np.asarray([centre_crop(gt, (100, 100)) for gt in list(mask)])
 
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)

@@ -69,7 +69,7 @@ from seg_3d.modeling.backbone.blocks import *
 
 @BACKBONE_REGISTRY.register()
 def build_unet3d_backbone(cfg, input_shape: ShapeSpec):
-    num_classes = len(cfg.ROIS) + 1
+    num_classes = len(cfg.ROIS)
     # TODO: initialize weights?
     model = UNet3D(in_channels=input_shape.channels, out_channels=num_classes)
     return model

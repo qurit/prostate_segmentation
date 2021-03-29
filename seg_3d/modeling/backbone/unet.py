@@ -1,8 +1,7 @@
 # original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/model.py
-import importlib
-
 import torch.nn as nn
 from detectron2.modeling.backbone import Backbone
+from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
 
 from seg_3d.modeling.backbone.buildingblocks import DoubleConv, ExtResNetBlock, create_encoders, create_decoders
 from seg_3d.utils2 import number_of_features_per_level
@@ -104,6 +103,7 @@ class Abstract3DUNet(Backbone):
         return x
 
 
+@BACKBONE_REGISTRY.register()
 class UNet3D(Abstract3DUNet):
     """
     3DUnet model from
@@ -128,6 +128,7 @@ class UNet3D(Abstract3DUNet):
                                      **kwargs)
 
 
+@BACKBONE_REGISTRY.register()
 class ResidualUNet3D(Abstract3DUNet):
     """
     Residual 3DUnet model implementation based on https://arxiv.org/pdf/1706.00120.pdf.
@@ -151,6 +152,7 @@ class ResidualUNet3D(Abstract3DUNet):
                                              **kwargs)
 
 
+@BACKBONE_REGISTRY.register()
 class UNet2D(Abstract3DUNet):
     """
     Just a standard 2D Unet. Arises naturally by specifying conv_kernel_size=(1, 3, 3), pool_kernel_size=(1, 2, 2).
@@ -173,16 +175,3 @@ class UNet2D(Abstract3DUNet):
                                      pool_kernel_size=(1, 2, 2),
                                      conv_padding=conv_padding,
                                      **kwargs)
-
-
-def get_model(model_config):
-    def _model_class(class_name):
-        modules = ['pytorch3dunet.unet3d.model']
-        for module in modules:
-            m = importlib.import_module(module)
-            clazz = getattr(m, class_name, None)
-            if clazz is not None:
-                return clazz
-
-    model_class = _model_class(model_config['name'])
-    return model_class(**model_config)

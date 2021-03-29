@@ -149,6 +149,8 @@ class ImageToImage3D(Dataset):
 
         self.all_frame_fps = {patient: glob.glob(patient_data[self.modality]['fp']+'/*.dcm') for patient,
                                                                              patient_data in self.dataset_dict.items()}
+        # self.all_frame_fps = {patient: glob.glob("data/" + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
+        #                       for patient in self.patient_keys}
 
         if joint_transform:
             self.joint_transform = joint_transform

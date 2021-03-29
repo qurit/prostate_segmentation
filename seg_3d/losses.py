@@ -196,7 +196,7 @@ class WeightedSmoothL1Loss(nn.SmoothL1Loss):
 
 # HELPERS #
 def get_loss_criterion(config):
-    return partial(LOSS_REGISTRY.get(config.LOSS))
+    return partial(LOSS_REGISTRY.get(config.LOSS.FN))
 
 
 def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):

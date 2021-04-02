@@ -6,6 +6,7 @@ import numpy as np
 from time import time
 
 from seg_3d import losses
+from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.data.dataset import ImageToImage3D
 from seg_3d.config import get_cfg
 import seg_3d.modeling.backbone.unet
@@ -21,36 +22,36 @@ from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from detectron2.utils.logger import setup_logger
 
-
 logger = logging.getLogger("detectron2")
 
 
 # TODO:
-# - resume option
-# - loads weights
 # - default directory
-# - implementation for eval
 # - plot loss
 # - use wandb and sacred
 def setup_config():
     cfg = get_cfg()
 
-    cfg.MODEL.DEVICE = "cuda:0"
+    cfg.MODEL.DEVICE = "cpu"  # "cuda:0"
     cfg.SEED = 99
 
     # pipeline modes
+    cfg.RESUME = False  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
-    cfg.TEST.EVAL_PERIOD = 0  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
-    cfg.EARLY_STOPPING.ENABLE = False
+    cfg.TEST.EVAL_PERIOD = 1  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
+    cfg.TEST.EVAL_METRICS = ["dice_score"]  # metrics which get computed during eval, TODO: add more metrics
+    cfg.EARLY_STOPPING.ENABLE = True
     cfg.EARLY_STOPPING.PATIENCE = 10
     cfg.EARLY_STOPPING.MONITOR = "val_loss"
 
     # paths
-    cfg.DATASET_PATH = "/home/yous/Desktop/ryt/image_dataset"
+    cfg.TRAIN_DATASET_PATH = "data/image_dataset"  # "/home/yous/Desktop/ryt/image_dataset"
+    cfg.TEST_DATASET_PATH = "data/test_dataset"
     cfg.OUTPUT_DIR = "seg_3d/output/test-1"
+    cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY or RESUME set to True
 
     # dataset options
-    cfg.MODALITY = "CT"
+    cfg.MODALITY = "PT"
     cfg.ROIS = ["Bladder"]
     # TODO: centre crop + other preprocessing options here
 
@@ -87,15 +88,45 @@ def get_es_result(mode, current, best_so_far):
         return current < best_so_far
 
 
+def do_test(cfg, model, loss, dataset, metric_list):
+    model.eval()
+    metric_list.reset()
+    logger = logging.getLogger("test")
+
+    inference_dict = {}
+    with torch.no_grad():
+        running_val_loss = 0.0
+        for batched_inputs in DataLoader(dataset, batch_size=1):
+            patient = batched_inputs["patient"][0]  # TODO: add logging
+            sample = batched_inputs["image"].unsqueeze(0).float()
+            labels = batched_inputs["gt_mask"].float().to(cfg.MODEL.DEVICE)
+
+            preds = model(sample).squeeze(0)
+            val_loss = loss(preds, labels)
+            running_val_loss += val_loss.item()
+            logger.info(running_val_loss)
+            metric_list(preds, labels)
+
+            inference_dict[patient] = {"gt": labels.numpy(),
+                                       "preds": preds.numpy(),
+                                       "image": batched_inputs["image"].numpy()}  # TODO: put individual scores here
+
+    model.train()  # TODO: save inference results to disk
+    # print to log and return results
+    return {
+        "val_loss": running_val_loss / dataset.__len__(), **metric_list.get_results(average=True)
+    }
+
+
 # TODO:
 # - switch from default optim
-# - evaluate on val set
 # - could load up all scans into memory
 def train(cfg, model):
     model.train()
 
     # get training dataset
-    dataset = ImageToImage3D(dataset_path=cfg.DATASET_PATH, modality=cfg.MODALITY, rois=cfg.ROIS)
+    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, modality=cfg.MODALITY, rois=cfg.ROIS)
+    val_dataset = ImageToImage3D(dataset_path=cfg.TEST_DATASET_PATH, modality=cfg.MODALITY, rois=cfg.ROIS)
 
     # get default optimizer (torch.optim.SGD) and scheduler
     optimizer = build_optimizer(cfg, model)
@@ -105,9 +136,13 @@ def train(cfg, model):
     loss = losses.get_loss_criterion(cfg)(**cfg.LOSS.PARAMS)
     logger.info("Loss:\n{}".format(loss))
 
+    # init eval metrics
+    metric_list = MetricList(metrics=get_metrics(cfg))
+
     # init checkpointers
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
-    start_iter = 0
+    # TODO: test if continue from iteration when resume=True
+    start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=cfg.RESUME).get("iteration", -1) + 1)
     max_iter = cfg.SOLVER.MAX_ITER
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
 
@@ -127,7 +162,7 @@ def train(cfg, model):
     with EventStorage(start_iter) as storage:
         # start main training loop
         for iteration, batched_inputs in zip(range(start_iter, max_iter),
-                                             DataLoader(dataset, batch_size=1, shuffle=False)):
+                                             DataLoader(train_dataset, batch_size=1, shuffle=False)):
 
             storage.step()
             sample = batched_inputs["image"].unsqueeze(0).float()
@@ -137,6 +172,7 @@ def train(cfg, model):
             preds = model(sample).squeeze(0)
 
             optimizer.zero_grad()
+            # TODO: fixup loss
             training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
             print(training_loss)
             training_loss.backward()
@@ -146,21 +182,25 @@ def train(cfg, model):
             storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
 
+            # TODO: to put image on tensorboard
+            # storage.put_image("img_name", img_tensor=)
+
             # check if need to run eval step on validation data
             if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
-                results = do_test(cfg, model)  # TODO:
-                storage.put_scalars(**results['metrics'])
+                results = do_test(cfg, model, loss, val_dataset, metric_list)  # TODO: print out results
+                print(results)
+                storage.put_scalars(**results)
 
                 if cfg.EARLY_STOPPING.ENABLE:
                     curr = None
-                    if cfg.EARLY_STOPPING.MONITOR in results['metrics'].keys():
-                        curr = results['metrics'][cfg.EARLY_STOPPING.MONITOR]
+                    if cfg.EARLY_STOPPING.MONITOR in results.keys():
+                        curr = results[cfg.EARLY_STOPPING.MONITOR]
 
                     if curr is None:
                         logger.warning("Early stopping enabled but cannot find metric: %s" %
                                        cfg.EARLY_STOPPING.MONITOR)
                         logger.warning("Options for monitored metrics are: [%s]" %
-                                       ", ".join(map(str, results['metrics'].keys())))
+                                       ", ".join(map(str, results.keys())))
                     elif best_monitor_metric is None:
                         best_monitor_metric = curr
                     elif get_es_result(cfg.EARLY_STOPPING.MODE,
@@ -170,16 +210,16 @@ def train(cfg, model):
                         logger.info("Best metric %s improved to %0.4f" %
                                     (cfg.EARLY_STOPPING.MONITOR, curr))
                         # update best model
-                        periodic_checkpointer.save(name="model_best", **{**results['metrics']})
+                        periodic_checkpointer.save(name="model_best", **results)
                         # save best metrics to a .txt file
                         with open(os.path.join(cfg.OUTPUT_DIR, 'best_metrics.txt'), 'w') as f:
-                            json.dump(results['metrics'], f)
+                            json.dump(results, f)
                     else:
                         logger.info("Early stopping metric %s did not improve, current %.04f, best %.04f" %
                                     (cfg.EARLY_STOPPING.MONITOR, curr, best_monitor_metric))
                         es_count += 1
 
-                storage.put_scalar('val_loss', results['metrics']['val_loss'])
+                storage.put_scalar('val_loss', results['val_loss'])
 
             # print out info about iteration
             # if iteration - start_iter > 5 and ((iteration + 1) % 20 == 0 or iteration == max_iter - 1):
@@ -191,6 +231,8 @@ def train(cfg, model):
                 logger.info("Early stopping triggered, metric %s has not improved for %s validation steps" %
                             (cfg.EARLY_STOPPING.MONITOR, cfg.EARLY_STOPPING.PATIENCE))
                 break
+
+            # TODO: print training time
 
 
 def seed_all(seed):
@@ -221,10 +263,12 @@ def run(cfg):
 
     # count number of parameters for model
     net_params = model.parameters()
-    weight_count = 0
-    for param in net_params:
-        weight_count += np.prod(param.size())
+    weight_count = sum(np.prod(param.size()) for param in net_params)
     logger.info("Number of model parameters: %.0f" % weight_count)
+
+    if cfg.EVAL_ONLY:
+        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
+        return do_test(cfg, model)
 
     return train(cfg, model)
 

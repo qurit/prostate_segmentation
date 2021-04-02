@@ -1,8 +1,15 @@
 from detectron2.config.defaults import _C
 from detectron2.config import CfgNode as CN
 
-# data directory
-_C.DATASET_PATH = 'data/image_dataset'
+SOLVER_PARAMS = _C.SOLVER
+# clear entire config
+_C.clear()
+
+# standard params
+_C.MODEL = CN()
+_C.MODEL.BACKBONE = CN()
+_C.SOLVER = SOLVER_PARAMS
+_C.TEST = CN()
 
 # eval only mode
 _C.EVAL_ONLY = False

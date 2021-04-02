@@ -1,6 +1,4 @@
 # original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/losses.py
-from functools import partial
-
 import torch
 import torch.nn.functional as F
 from torch import nn as nn
@@ -196,7 +194,7 @@ class WeightedSmoothL1Loss(nn.SmoothL1Loss):
 
 # HELPERS #
 def get_loss_criterion(config):
-    return partial(LOSS_REGISTRY.get(config.LOSS.FN))
+    return LOSS_REGISTRY.get(config.LOSS.FN)
 
 
 def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):

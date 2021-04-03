@@ -1,12 +1,14 @@
 import os
 import json
 import random
+import pickle
 import logging
 import numpy as np
 from time import time
 
-from seg_3d import losses
+from seg_3d.losses import get_loss_criterion
 from seg_3d.evaluation.metrics import MetricList, get_metrics
+from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.data.dataset import ImageToImage3D
 from seg_3d.config import get_cfg
 import seg_3d.modeling.backbone.unet
@@ -38,7 +40,7 @@ def setup_config():
     # pipeline modes
     cfg.RESUME = False  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
-    cfg.TEST.EVAL_PERIOD = 1  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
+    cfg.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
     cfg.TEST.EVAL_METRICS = ["dice_score"]  # metrics which get computed during eval, TODO: add more metrics
     cfg.EARLY_STOPPING.ENABLE = True
     cfg.EARLY_STOPPING.PATIENCE = 10
@@ -73,7 +75,7 @@ def setup_config():
     cfg.SOLVER.BASE_LR = 0.001
     cfg.SOLVER.IMS_PER_BATCH = 1
     cfg.SOLVER.MAX_ITER = 1000
-    cfg.SOLVER.CHECKPOINT_PERIOD = 10  # Save a checkpoint after every this number of iterations
+    cfg.SOLVER.CHECKPOINT_PERIOD = 100  # Save a checkpoint after every this number of iterations
     cfg.SOLVER.GAMMA = 0.1
     cfg.SOLVER.STEPS = (30000,)  # The iteration number to decrease learning rate by GAMMA
 
@@ -86,36 +88,6 @@ def get_es_result(mode, current, best_so_far):
         return current > best_so_far
     elif mode == 'min':
         return current < best_so_far
-
-
-def do_test(cfg, model, loss, dataset, metric_list):
-    model.eval()
-    metric_list.reset()
-    logger = logging.getLogger("test")
-
-    inference_dict = {}
-    with torch.no_grad():
-        running_val_loss = 0.0
-        for batched_inputs in DataLoader(dataset, batch_size=1):
-            patient = batched_inputs["patient"][0]  # TODO: add logging
-            sample = batched_inputs["image"].unsqueeze(0).float()
-            labels = batched_inputs["gt_mask"].float().to(cfg.MODEL.DEVICE)
-
-            preds = model(sample).squeeze(0)
-            val_loss = loss(preds, labels)
-            running_val_loss += val_loss.item()
-            logger.info(running_val_loss)
-            metric_list(preds, labels)
-
-            inference_dict[patient] = {"gt": labels.numpy(),
-                                       "preds": preds.numpy(),
-                                       "image": batched_inputs["image"].numpy()}  # TODO: put individual scores here
-
-    model.train()  # TODO: save inference results to disk
-    # print to log and return results
-    return {
-        "val_loss": running_val_loss / dataset.__len__(), **metric_list.get_results(average=True)
-    }
 
 
 # TODO:
@@ -133,11 +105,12 @@ def train(cfg, model):
     scheduler = build_lr_scheduler(cfg, optimizer)
 
     # init loss criterion
-    loss = losses.get_loss_criterion(cfg)(**cfg.LOSS.PARAMS)
+    loss = get_loss_criterion(cfg)(**cfg.LOSS.PARAMS)
     logger.info("Loss:\n{}".format(loss))
 
-    # init eval metrics
+    # init eval metrics and evaluator
     metric_list = MetricList(metrics=get_metrics(cfg))
+    evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, metric_list=metric_list)
 
     # init checkpointers
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
@@ -147,7 +120,7 @@ def train(cfg, model):
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
 
     # init writers which periodically output/save metric scores
-    writers = [CommonMetricPrinter(max_iter),
+    writers = [CommonMetricPrinter(max_iter, window_size=1),
                JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json")),
                TensorboardXWriter(cfg.OUTPUT_DIR)]
 
@@ -172,54 +145,52 @@ def train(cfg, model):
             preds = model(sample).squeeze(0)
 
             optimizer.zero_grad()
-            # TODO: fixup loss
             training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
-            print(training_loss)
             training_loss.backward()
             optimizer.step()
 
-            storage.put_scalars(total_loss=training_loss)
-            storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
+            storage.put_scalars(training_loss=training_loss, lr=optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
 
             # TODO: to put image on tensorboard
             # storage.put_image("img_name", img_tensor=)
 
             # check if need to run eval step on validation data
+            # TODO put this in helper
             if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
-                results = do_test(cfg, model, loss, val_dataset, metric_list)  # TODO: print out results
-                print(results)
-                storage.put_scalars(**results)
+                results = evaluator.evaluate(model)
+                storage.put_scalars(**results["metrics"])
 
                 if cfg.EARLY_STOPPING.ENABLE:
                     curr = None
-                    if cfg.EARLY_STOPPING.MONITOR in results.keys():
-                        curr = results[cfg.EARLY_STOPPING.MONITOR]
+                    if cfg.EARLY_STOPPING.MONITOR in results["metrics"].keys():
+                        curr = results["metrics"][cfg.EARLY_STOPPING.MONITOR]
 
                     if curr is None:
-                        logger.warning("Early stopping enabled but cannot find metric: %s" %
+                        logger.warning("Early stopping enabled but cannot find metric: \'%s\'" %
                                        cfg.EARLY_STOPPING.MONITOR)
                         logger.warning("Options for monitored metrics are: [%s]" %
-                                       ", ".join(map(str, results.keys())))
+                                       ", ".join(map(str, results["metrics"].keys())))
                     elif best_monitor_metric is None:
                         best_monitor_metric = curr
                     elif get_es_result(cfg.EARLY_STOPPING.MODE,
                                        curr, best_monitor_metric):
                         best_monitor_metric = curr
                         es_count = 0
-                        logger.info("Best metric %s improved to %0.4f" %
+                        logger.info("Best metric \'%s\' improved to %0.4f" %
                                     (cfg.EARLY_STOPPING.MONITOR, curr))
                         # update best model
-                        periodic_checkpointer.save(name="model_best", **results)
+                        periodic_checkpointer.save(name="model_best", **results["metrics"])
+                        # save inference results
+                        with open(os.path.join(cfg.OUTPUT_DIR, 'inference.pk'), 'wb') as f:
+                            pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
                         # save best metrics to a .txt file
                         with open(os.path.join(cfg.OUTPUT_DIR, 'best_metrics.txt'), 'w') as f:
-                            json.dump(results, f)
+                            json.dump(results["metrics"], f)
                     else:
-                        logger.info("Early stopping metric %s did not improve, current %.04f, best %.04f" %
+                        logger.info("Early stopping metric \'%s\' did not improve, current %.04f, best %.04f" %
                                     (cfg.EARLY_STOPPING.MONITOR, curr, best_monitor_metric))
                         es_count += 1
-
-                storage.put_scalar('val_loss', results['val_loss'])
 
             # print out info about iteration
             # if iteration - start_iter > 5 and ((iteration + 1) % 20 == 0 or iteration == max_iter - 1):

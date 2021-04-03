@@ -21,6 +21,9 @@ class MetricList:
     def reset(self):
         self.results = {key: [] for key in self.metrics.keys()}
 
+    def get_results_idx(self, idx):
+        return {key: value[idx] for key, value in self.results.items()}
+
     def get_results(self, average=False):
         if not average:
             return self.results

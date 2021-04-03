@@ -16,10 +16,6 @@ _C.EVAL_ONLY = False
 
 # early stopping mode
 _C.EARLY_STOPPING = CN()
-_C.EARLY_STOPPING.ENABLE = False
-_C.EARLY_STOPPING.MONITOR = 'val_loss'
-_C.EARLY_STOPPING.PATIENCE = 0
-_C.EARLY_STOPPING.MODE = 'max'
 
 # loss
 _C.LOSS = CN()

@@ -1,6 +1,5 @@
 import os
 import json
-import random
 import pickle
 import logging
 import numpy as np
@@ -11,10 +10,10 @@ from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.data.dataset import ImageToImage3D
 from seg_3d.config import get_cfg
+from seg_3d.seg_utils import EarlyStopping, seed_all
 import seg_3d.modeling.backbone.unet
 import seg_3d.modeling.meta_arch.segnet
 
-import torch
 from torch.utils.data import DataLoader
 from detectron2.utils.file_io import PathManager
 from detectron2.utils.collect_env import collect_env_info
@@ -23,6 +22,7 @@ from detectron2.solver import build_lr_scheduler, build_optimizer
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from detectron2.utils.logger import setup_logger
+
 
 logger = logging.getLogger("detectron2")
 
@@ -41,10 +41,12 @@ def setup_config():
     cfg.RESUME = False  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
     cfg.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
-    cfg.TEST.EVAL_METRICS = ["dice_score"]  # metrics which get computed during eval, TODO: add more metrics
-    cfg.EARLY_STOPPING.ENABLE = True
-    cfg.EARLY_STOPPING.PATIENCE = 10
+    cfg.TEST.EVAL_METRICS = ["dice_score"]  # metrics which get computed during eval
+    #                        "classwise_iou",  # FIXME
+    #                        "classwise_f1"]
+    cfg.EARLY_STOPPING.PATIENCE = 10  # set to 0 to disable
     cfg.EARLY_STOPPING.MONITOR = "val_loss"
+    cfg.EARLY_STOPPING.MODE = "max"
 
     # paths
     cfg.TRAIN_DATASET_PATH = "data/image_dataset"  # "/home/yous/Desktop/ryt/image_dataset"
@@ -64,6 +66,7 @@ def setup_config():
     cfg.UNET.in_channels = 1
     cfg.UNET.out_channels = 1
     cfg.UNET.f_maps = 8
+    cfg.UNET.final_sigmoid = True  # final activation used during testing, if True then apply Sigmoid, else apply Softmax
 
     # loss
     cfg.LOSS.FN = "BCEDiceLoss"  # available loss functions are inside losses.py
@@ -78,16 +81,9 @@ def setup_config():
     cfg.SOLVER.CHECKPOINT_PERIOD = 100  # Save a checkpoint after every this number of iterations
     cfg.SOLVER.GAMMA = 0.1
     cfg.SOLVER.STEPS = (30000,)  # The iteration number to decrease learning rate by GAMMA
+    cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
 
     return cfg
-
-
-def get_es_result(mode, current, best_so_far):
-    """Returns true if monitored metric has been improved"""
-    if mode == 'max':
-        return current > best_so_far
-    elif mode == 'min':
-        return current < best_so_far
 
 
 # TODO:
@@ -125,8 +121,10 @@ def train(cfg, model):
                TensorboardXWriter(cfg.OUTPUT_DIR)]
 
     # init early stopping
-    best_monitor_metric = None
-    es_count = 0
+    early_stopping = EarlyStopping(monitor=cfg.EARLY_STOPPING.MONITOR,
+                                   patience=cfg.EARLY_STOPPING.PATIENCE,
+                                   mode=cfg.EARLY_STOPPING.MODE)
+    early_stopping.check_is_valid(metric_list)
 
     # measuring the time elapsed
     train_start = time()
@@ -152,67 +150,32 @@ def train(cfg, model):
             storage.put_scalars(training_loss=training_loss, lr=optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
 
-            # TODO: to put image on tensorboard
-            # storage.put_image("img_name", img_tensor=)
-
             # check if need to run eval step on validation data
-            # TODO put this in helper
             if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
                 results = evaluator.evaluate(model)
                 storage.put_scalars(**results["metrics"])
 
-                if cfg.EARLY_STOPPING.ENABLE:
-                    curr = None
-                    if cfg.EARLY_STOPPING.MONITOR in results["metrics"].keys():
-                        curr = results["metrics"][cfg.EARLY_STOPPING.MONITOR]
+                # check early stopping
+                if early_stopping.check_early_stopping(results["metrics"]):
+                    # update best model
+                    periodic_checkpointer.save(name="model_best", **results["metrics"])
+                    # save inference results
+                    with open(os.path.join(cfg.OUTPUT_DIR, 'inference.pk'), 'wb') as f:
+                        pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
+                    # save best metrics to a .txt file
+                    with open(os.path.join(cfg.OUTPUT_DIR, 'best_metrics.txt'), 'w') as f:
+                        json.dump(results["metrics"], f)
 
-                    if curr is None:
-                        logger.warning("Early stopping enabled but cannot find metric: \'%s\'" %
-                                       cfg.EARLY_STOPPING.MONITOR)
-                        logger.warning("Options for monitored metrics are: [%s]" %
-                                       ", ".join(map(str, results["metrics"].keys())))
-                    elif best_monitor_metric is None:
-                        best_monitor_metric = curr
-                    elif get_es_result(cfg.EARLY_STOPPING.MODE,
-                                       curr, best_monitor_metric):
-                        best_monitor_metric = curr
-                        es_count = 0
-                        logger.info("Best metric \'%s\' improved to %0.4f" %
-                                    (cfg.EARLY_STOPPING.MONITOR, curr))
-                        # update best model
-                        periodic_checkpointer.save(name="model_best", **results["metrics"])
-                        # save inference results
-                        with open(os.path.join(cfg.OUTPUT_DIR, 'inference.pk'), 'wb') as f:
-                            pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
-                        # save best metrics to a .txt file
-                        with open(os.path.join(cfg.OUTPUT_DIR, 'best_metrics.txt'), 'w') as f:
-                            json.dump(results["metrics"], f)
-                    else:
-                        logger.info("Early stopping metric \'%s\' did not improve, current %.04f, best %.04f" %
-                                    (cfg.EARLY_STOPPING.MONITOR, curr, best_monitor_metric))
-                        es_count += 1
+                elif early_stopping.triggered:
+                    # do something before finishing execution?
+                    break
 
             # print out info about iteration
             # if iteration - start_iter > 5 and ((iteration + 1) % 20 == 0 or iteration == max_iter - 1):
             for writer in writers:
                 writer.write()
             periodic_checkpointer.step(iteration)
-
-            if es_count >= cfg.EARLY_STOPPING.PATIENCE:
-                logger.info("Early stopping triggered, metric %s has not improved for %s validation steps" %
-                            (cfg.EARLY_STOPPING.MONITOR, cfg.EARLY_STOPPING.PATIENCE))
-                break
-
             # TODO: print training time
-
-
-def seed_all(seed):
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True  # may result in a slowdown if set to True
 
 
 def run(cfg):
@@ -239,7 +202,7 @@ def run(cfg):
 
     if cfg.EVAL_ONLY:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
-        return do_test(cfg, model)
+        return NotImplementedError
 
     return train(cfg, model)
 

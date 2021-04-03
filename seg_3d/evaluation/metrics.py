@@ -2,7 +2,10 @@
 import numpy as np
 import torch
 
+from seg_3d.losses import compute_per_channel_dice
+
 from detectron2.utils.registry import Registry
+
 
 METRIC_REGISTRY = Registry('METRIC')
 EPSILON = 1e-32
@@ -28,14 +31,12 @@ class MetricList:
         if not average:
             return self.results
         else:
-            return {key: np.mean(value) for key, value in self.results.items()}
+            return {key: float(np.mean(value)) for key, value in self.results.items()}
 
 
 @METRIC_REGISTRY.register()
 def dice_score(pred, gt):
-    # TODO: output of pred is not binary
-    return 0.
-    # return 0. if sum(pred) == 0 else (pred[gt == 1]).sum() * 2.0 / (sum(pred) + sum(gt))
+    return torch.mean(compute_per_channel_dice(pred.unsqueeze(0), gt.unsqueeze(0), epsilon=1e-6))
 
 
 @METRIC_REGISTRY.register()

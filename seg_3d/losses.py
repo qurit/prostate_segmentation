@@ -5,7 +5,7 @@ from torch import nn as nn
 from torch.autograd import Variable
 from detectron2.utils.registry import Registry
 
-from seg_3d.utils2 import expand_as_one_hot
+from seg_3d.seg_utils import expand_as_one_hot
 
 LOSS_REGISTRY = Registry('LOSS')
 

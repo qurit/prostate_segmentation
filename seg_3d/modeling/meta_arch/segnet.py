@@ -16,6 +16,10 @@ class SemanticSegNet(nn.Module):
         self.backbone = BACKBONE_REGISTRY.get(self.backbone_name)(**cfg.UNET)
         self.device = cfg.MODEL.DEVICE
 
+    @property
+    def final_activation(self):
+        return self.backbone.final_activation
+
     def forward(self, x):
         images = x.to(self.device)
         return self.backbone(images)

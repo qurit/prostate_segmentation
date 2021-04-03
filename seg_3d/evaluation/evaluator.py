@@ -29,8 +29,11 @@ class Evaluator:
                 labels = data_input["gt_mask"].float().to(self.device)
 
                 preds = model(sample).squeeze(0)
-                self.metric_list(preds, labels)
                 self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
+
+                # apply final activation on preds
+                preds = model.final_activation(preds)
+                self.metric_list(preds, labels)
 
                 # print out results for patient
                 self.logger.info("results for patient {}:".format(patient))

@@ -22,6 +22,7 @@ from detectron2.solver import build_lr_scheduler, build_optimizer
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from detectron2.utils.logger import setup_logger
+from detectron2.data.samplers import TrainingSampler
 
 
 logger = logging.getLogger("detectron2")
@@ -46,12 +47,12 @@ def setup_config():
     #                        "classwise_f1"]
     cfg.EARLY_STOPPING.PATIENCE = 10  # set to 0 to disable
     cfg.EARLY_STOPPING.MONITOR = "val_loss"
-    cfg.EARLY_STOPPING.MODE = "max"
+    cfg.EARLY_STOPPING.MODE = "min"
 
     # paths
     cfg.TRAIN_DATASET_PATH = "data/image_dataset"  # "/home/yous/Desktop/ryt/image_dataset"
     cfg.TEST_DATASET_PATH = "data/test_dataset"
-    cfg.OUTPUT_DIR = "seg_3d/output/test-1"
+    cfg.OUTPUT_DIR = "seg_3d/output/test-2"
     cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY or RESUME set to True
 
     # dataset options
@@ -132,8 +133,11 @@ def train(cfg, model):
 
     with EventStorage(start_iter) as storage:
         # start main training loop
-        for iteration, batched_inputs in zip(range(start_iter, max_iter),
-                                             DataLoader(train_dataset, batch_size=1, shuffle=False)):
+        for iteration, batched_inputs in zip(
+                range(start_iter, max_iter),
+                DataLoader(train_dataset, batch_size=1,
+                           sampler=TrainingSampler(size=len(train_dataset), shuffle=False, seed=cfg.SEED))
+        ):
 
             storage.step()
             sample = batched_inputs["image"].unsqueeze(0).float()

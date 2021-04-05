@@ -182,7 +182,7 @@ class ImageToImage3D(Dataset):
         mask = mask.unsqueeze(0)
         if self.one_hot_mask:
             assert self.one_hot_mask > 0, 'one_hot_mask must be nonnegative'
-            mask = torch.zeros((self.one_hot_mask, *mask.shape[1:])).scatter_(1, mask, 1)
+            mask = torch.zeros((self.one_hot_mask, *mask.shape[1:])).scatter_(0, mask.long(), 1)
 
         return {
             "image": image.unsqueeze(0).float(),

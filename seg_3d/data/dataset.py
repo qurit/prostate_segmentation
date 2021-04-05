@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import pydicom as dicom
 from collections import UserList
-from typing import List
+from typing import List, Tuple
 
 from skimage import io
 
@@ -132,12 +132,14 @@ class ImageToImage3D(Dataset):
         one_hot_mask: bool, if True, returns the mask in one-hot encoded form.
     """
 
-    def __init__(self, dataset_path: str, modality: str, rois: List[str], patient_keys: List[str] = None,
-                 joint_transform: Callable = None, one_hot_mask: int = False) -> None:
+    def __init__(self, dataset_path: str, modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
+                 patient_keys: List[str] = None, joint_transform: Callable = None, one_hot_mask: int = False) -> None:
         self.dataset_path = dataset_path
         self.modality = modality
         self.patient_keys = patient_keys
         self.rois = rois
+        self.num_slices = num_slices
+        self.crop_size = crop_size
         self.one_hot_mask = one_hot_mask
 
         with open(os.path.join(dataset_path, "global_dict.json")) as file_obj:
@@ -147,10 +149,10 @@ class ImageToImage3D(Dataset):
         if patient_keys is None:
             self.patient_keys = self.dataset_dict.keys()
 
-        self.all_frame_fps = {patient: glob.glob(patient_data[self.modality]['fp']+'/*.dcm') for patient,
-                                                                             patient_data in self.dataset_dict.items()}
-        # self.all_frame_fps = {patient: glob.glob("data/" + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
-        #                       for patient in self.patient_keys}
+        # self.all_frame_fps = {patient: glob.glob(patient_data[self.modality]['fp']+'/*.dcm') for patient,
+        #                                                                      patient_data in self.dataset_dict.items()}
+        self.all_frame_fps = {patient: glob.glob("data/" + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
+                              for patient in self.patient_keys}
 
         if joint_transform:
             self.joint_transform = joint_transform
@@ -171,29 +173,33 @@ class ImageToImage3D(Dataset):
         # read mask image
         mask = self.get_mask(patient, image)
 
-        # correct dimensions if needed
-        # image, mask = correct_dims(image, mask)
-
-        image = np.asarray([centre_crop(img, (100, 100)) for img in list(image)])
-        mask = np.asarray([centre_crop(gt, (100, 100)) for gt in list(mask)])
+        image = centre_crop(image, (image.shape[0], *self.crop_size))[:self.num_slices]
+        mask = centre_crop(mask, (mask.shape[0], *self.crop_size))[:self.num_slices]
 
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)
 
+        mask = mask.unsqueeze(0)
         if self.one_hot_mask:
             assert self.one_hot_mask > 0, 'one_hot_mask must be nonnegative'
-            mask = torch.zeros((self.one_hot_mask, mask.shape[1], mask.shape[2])).scatter_(0, mask.long(), 1)
+            mask = torch.zeros((self.one_hot_mask, *mask.shape[1:])).scatter_(1, mask, 1)
 
-        return {"image": image,
-                "gt_mask": mask,
-                "patient": patient}
+        return {
+            "image": image.unsqueeze(0).float(),
+            "gt_mask": mask.float(),
+            "patient": patient
+        }
 
     def get_mask(self, patient, image):
         # FIXME: assumes roi is size 1
         img_size = np.shape(image)
         roi = self.dataset_dict[patient][self.modality]['rois'][self.rois[0]]
-        mask = np.asarray([contour2mask(roi[frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))])
-        return mask
+        return np.asarray(
+            [
+                contour2mask(roi[frame], img_size[1:3])
+                for frame in range(len(self.all_frame_fps[patient]))
+            ]
+        )
 
 
 class Image2D(Dataset):

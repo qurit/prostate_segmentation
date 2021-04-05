@@ -23,3 +23,6 @@ _C.LOSS.PARAMS = CN()
 
 # unet
 _C.UNET = CN()
+
+# dataset
+_C.DATASET = CN()

@@ -100,15 +100,15 @@ class GeneralizedDiceLoss(_AbstractDiceLoss):
 class BCEDiceLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, alpha, beta):
+    def __init__(self, bce_weight, dice_weight):
         super(BCEDiceLoss, self).__init__()
-        self.alpha = alpha
+        self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
-        self.beta = beta
+        self.dice_weight = dice_weight
         self.dice = DiceLoss()
 
     def forward(self, input, target):
-        return self.alpha * self.bce(input, target) + self.beta * self.dice(input, target)
+        return self.bce_weight * self.bce(input, target) + self.dice_weight * self.dice(input, target)
 
 
 @LOSS_REGISTRY.register()

@@ -4,6 +4,7 @@ import pickle
 import logging
 import numpy as np
 from time import time
+from datetime import datetime
 
 from seg_3d.losses import get_loss_criterion
 from seg_3d.evaluation.metrics import MetricList, get_metrics
@@ -28,10 +29,6 @@ from detectron2.data.samplers import TrainingSampler
 logger = logging.getLogger("detectron2")
 
 
-# TODO:
-# - default directory
-# - plot loss
-# - use wandb and sacred
 def setup_config():
     cfg = get_cfg()
 
@@ -42,12 +39,10 @@ def setup_config():
     cfg.RESUME = False  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
     cfg.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
-    cfg.TEST.EVAL_METRICS = ["dice_score"]  # metrics which get computed during eval
-    #                        "classwise_iou",  # FIXME
-    #                        "classwise_f1"]
+    cfg.TEST.EVAL_METRICS = ["dice_score", "iou", "f1"]  # metrics which get computed during eval
     cfg.EARLY_STOPPING.PATIENCE = 10  # set to 0 to disable
-    cfg.EARLY_STOPPING.MONITOR = "val_loss"
-    cfg.EARLY_STOPPING.MODE = "min"
+    cfg.EARLY_STOPPING.MONITOR = "dice_score"
+    cfg.EARLY_STOPPING.MODE = "max"
 
     # paths
     cfg.TRAIN_DATASET_PATH = "data/image_dataset"  # "/home/yous/Desktop/ryt/image_dataset"
@@ -56,9 +51,11 @@ def setup_config():
     cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY or RESUME set to True
 
     # dataset options
-    cfg.MODALITY = "PT"
-    cfg.ROIS = ["Bladder"]
-    # TODO: centre crop + other preprocessing options here
+    cfg.DATASET.modality = "PT"
+    cfg.DATASET.rois = ["Bladder"]
+    cfg.DATASET.num_slices = 128  # number of slices in axial plane
+    cfg.DATASET.crop_size = (128, 128)  # size of centre crop
+    cfg.DATASET.one_hot_mask = False  # False or int for num of classes
 
     # model architecture
     cfg.MODEL.META_ARCHITECTURE = "SemanticSegNet"
@@ -71,18 +68,23 @@ def setup_config():
 
     # loss
     cfg.LOSS.FN = "BCEDiceLoss"  # available loss functions are inside losses.py
-    # specify loss params
-    cfg.LOSS.PARAMS.alpha = 1.0
-    cfg.LOSS.PARAMS.beta = 0.0
+    # specify loss params (if any)
+    cfg.LOSS.PARAMS.bce_weight = 0.0
+    cfg.LOSS.PARAMS.dice_weight = 1.0
 
     # solver params
     cfg.SOLVER.BASE_LR = 0.001
-    cfg.SOLVER.IMS_PER_BATCH = 1
+    cfg.SOLVER.IMS_PER_BATCH = 3
     cfg.SOLVER.MAX_ITER = 1000
     cfg.SOLVER.CHECKPOINT_PERIOD = 100  # Save a checkpoint after every this number of iterations
     cfg.SOLVER.GAMMA = 0.1
     cfg.SOLVER.STEPS = (30000,)  # The iteration number to decrease learning rate by GAMMA
     cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
+    cfg.SOLVER.MOMENTUM = 0.9
+
+    # make a default dir
+    if not cfg.OUTPUT_DIR:
+        cfg.OUTPUT_DIR = os.path.join("seg_3d/output", str(datetime.now().strftime('%m-%d_%H:%M/')))
 
     return cfg
 
@@ -94,8 +96,8 @@ def train(cfg, model):
     model.train()
 
     # get training dataset
-    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, modality=cfg.MODALITY, rois=cfg.ROIS)
-    val_dataset = ImageToImage3D(dataset_path=cfg.TEST_DATASET_PATH, modality=cfg.MODALITY, rois=cfg.ROIS)
+    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, **cfg.DATASET)
+    val_dataset = ImageToImage3D(dataset_path=cfg.TEST_DATASET_PATH, **cfg.DATASET)
 
     # get default optimizer (torch.optim.SGD) and scheduler
     optimizer = build_optimizer(cfg, model)
@@ -135,16 +137,16 @@ def train(cfg, model):
         # start main training loop
         for iteration, batched_inputs in zip(
                 range(start_iter, max_iter),
-                DataLoader(train_dataset, batch_size=1,
-                           sampler=TrainingSampler(size=len(train_dataset), shuffle=False, seed=cfg.SEED))
+                DataLoader(train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+                           sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
         ):
 
             storage.step()
-            sample = batched_inputs["image"].unsqueeze(0).float()
-            labels = batched_inputs["gt_mask"].float().to(cfg.MODEL.DEVICE)
+            sample = batched_inputs["image"]
+            labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
 
-            # do a forward pass, input is of shape (b, c, d, h, w)
-            preds = model(sample).squeeze(0)
+            # do a forward pass, input is of shape (N, C, D, H, W)
+            preds = model(sample)
 
             optimizer.zero_grad()
             training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
@@ -179,7 +181,9 @@ def train(cfg, model):
             for writer in writers:
                 writer.write()
             periodic_checkpointer.step(iteration)
-            # TODO: print training time
+
+    train_time = time() - train_start
+    logger.info("Completed training in %.0f s (%.2f h)" % (train_time, train_time/3600))
 
 
 def run(cfg):

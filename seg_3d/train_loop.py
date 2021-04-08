@@ -52,7 +52,7 @@ def setup_config():
 
     # dataset options
     cfg.DATASET.modality = "PT"
-    cfg.DATASET.rois = ["Bladder"]
+    cfg.DATASET.rois = ["Bladder", "Inter"]
     cfg.DATASET.num_slices = 128  # number of slices in axial plane
     cfg.DATASET.crop_size = (128, 128)  # size of centre crop
     cfg.DATASET.one_hot_mask = False  # False or int for num of classes
@@ -74,7 +74,7 @@ def setup_config():
 
     # solver params
     cfg.SOLVER.BASE_LR = 0.001
-    cfg.SOLVER.IMS_PER_BATCH = 3
+    cfg.SOLVER.IMS_PER_BATCH = 1
     cfg.SOLVER.MAX_ITER = 1000
     cfg.SOLVER.CHECKPOINT_PERIOD = 100  # Save a checkpoint after every this number of iterations
     cfg.SOLVER.GAMMA = 0.1
@@ -143,10 +143,10 @@ def train(cfg, model):
 
             storage.step()
             sample = batched_inputs["image"]
-            labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
+            labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
 
             # do a forward pass, input is of shape (N, C, D, H, W)
-            preds = model(sample)
+            preds = model(sample).squeeze(1)
 
             optimizer.zero_grad()
             training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips

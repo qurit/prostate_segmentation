@@ -151,7 +151,7 @@ class ImageToImage3D(Dataset):
 
         # self.all_frame_fps = {patient: glob.glob(patient_data[self.modality]['fp']+'/*.dcm') for patient,
         #                                                                      patient_data in self.dataset_dict.items()}
-        self.all_frame_fps = {patient: glob.glob("data/" + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
+        self.all_frame_fps = {patient: glob.glob(self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
                               for patient in self.patient_keys}
 
         if joint_transform:
@@ -176,6 +176,8 @@ class ImageToImage3D(Dataset):
         image = centre_crop(image, (image.shape[0], *self.crop_size))[:self.num_slices]
         mask = centre_crop(mask, (mask.shape[0], *self.crop_size))[:self.num_slices]
 
+        image = image / np.max(image)
+
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)
 
@@ -191,15 +193,18 @@ class ImageToImage3D(Dataset):
         }
 
     def get_mask(self, patient, image):
-        # FIXME: assumes roi is size 1
+
         img_size = np.shape(image)
-        roi = self.dataset_dict[patient][self.modality]['rois'][self.rois[0]]
-        return np.asarray(
+        rois = [self.dataset_dict[patient][self.modality]['rois'][roi] for roi in self.rois]
+        mask = np.asarray(
             [
-                contour2mask(roi[frame], img_size[1:3])
-                for frame in range(len(self.all_frame_fps[patient]))
-            ]
+                [contour2mask(roi[frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))
+            ] for roi in rois]
         )
+
+        mask = np.concatenate([[np.zeros(mask.shape[1:])], mask], axis=0).argmax(axis=0)
+
+        return mask
 
 
 class Image2D(Dataset):

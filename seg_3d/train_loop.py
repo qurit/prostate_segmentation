@@ -7,16 +7,18 @@ import pickle
 import logging
 import numpy as np
 from time import time
-from datetime import datetime
 
 from seg_3d.losses import get_loss_criterion
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.evaluation.evaluator import Evaluator
+<<<<<<< HEAD
 from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
 from seg_3d.config import get_cfg
+=======
+from seg_3d.data.dataset import ImageToImage3D
+>>>>>>> 2abd97ca3a38abcb9047297cfa8a4d0bbb34d916
 from seg_3d.seg_utils import EarlyStopping, seed_all
-import seg_3d.modeling.backbone.unet
-import seg_3d.modeling.meta_arch.segnet
+from seg_3d.setup_config import setup_config
 
 from torch.utils.data import DataLoader
 from detectron2.utils.file_io import PathManager
@@ -32,6 +34,7 @@ from detectron2.data.samplers import TrainingSampler
 logger = logging.getLogger("detectron2")
 
 
+<<<<<<< HEAD
 def setup_config():
     cfg = get_cfg()
 
@@ -92,6 +95,8 @@ def setup_config():
     return cfg
 
 
+=======
+>>>>>>> 2abd97ca3a38abcb9047297cfa8a4d0bbb34d916
 # TODO:
 # - switch from default optim
 # - could load up all scans into memory

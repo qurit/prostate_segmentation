@@ -2,8 +2,9 @@
 import os
 import json
 import glob
-import numpy as np
 import torch
+import elasticdeform
+import numpy as np
 import pydicom as dicom
 from collections import UserList
 from typing import List, Tuple
@@ -52,26 +53,29 @@ class JointTransform2D:
         crop: tuple describing the size of the random crop. If bool(crop) evaluates to False, no crop will
             be taken.
         p_flip: float, the probability of performing a random horizontal flip.
-        color_jitter_params: tuple describing the parameters of torchvision.transforms.ColorJitter.
-            If bool(color_jitter_params) evaluates to false, no color jitter transformation will be used.
-        p_random_affine: float, the probability of performing a random affine transform using
-            torchvision.transforms.RandomAffine.
-        long_mask: bool, if True, returns the mask as LongTensor in label-encoded format.
     """
 
-    def __init__(self, crop=(256, 256), p_flip=0.5, color_jitter_params=(0.1, 0.1, 0.1, 0.1),
-                 p_random_affine=0, long_mask=False):
+    def __init__(self, crop=(100, 100), p_flip=0.5, deform=None):
+
         self.crop = crop
         self.p_flip = p_flip
-        self.color_jitter_params = color_jitter_params
-        if color_jitter_params:
-            self.color_tf = T.ColorJitter(*color_jitter_params)
-        self.p_random_affine = p_random_affine
-        self.long_mask = long_mask
+        if deform:
+            self.deform = lambda x, y: elasticdeform.deform_random_grid([x, y], sigma=deform)
+        else:
+            self.deform = deform
 
     def __call__(self, image, mask):
-        # transforming to PIL image
-        image, mask = F.to_pil_image(image), F.to_pil_image(mask)
+
+        # elastic deform on numpy arrays
+        if self.deform:
+            image, mask = self.deform(image, mask)
+        
+        # transforming to tensor
+        image = F.to_tensor(image)
+        mask = F.to_tensor(mask)
+
+        # # transforming to PIL image
+        # image, mask = F.to_pil_image(image), F.to_pil_image(mask)
 
         # random crop
         if self.crop:
@@ -81,22 +85,7 @@ class JointTransform2D:
         if np.random.rand() < self.p_flip:
             image, mask = F.hflip(image), F.hflip(mask)
 
-        # color transforms || ONLY ON IMAGE
-        if self.color_jitter_params:
-            image = self.color_tf(image)
-
-        # random affine transform
-        if np.random.rand() < self.p_random_affine:
-            affine_params = T.RandomAffine(180).get_params((-90, 90), (1, 1), (2, 2), (-45, 45), self.crop)
-            image, mask = F.affine(image, *affine_params), F.affine(mask, *affine_params)
-
-        # transforming to tensor
-        image = F.to_tensor(image)
-        if not self.long_mask:
-            mask = F.to_tensor(mask)
-        else:
-            mask = to_long_tensor(mask)
-
+        
         return image, mask
 
 
@@ -149,9 +138,7 @@ class ImageToImage3D(Dataset):
         if patient_keys is None:
             self.patient_keys = self.dataset_dict.keys()
 
-        # self.all_frame_fps = {patient: glob.glob(patient_data[self.modality]['fp']+'/*.dcm') for patient,
-        #                                                                      patient_data in self.dataset_dict.items()}
-        self.all_frame_fps = {patient: glob.glob(self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
+        self.all_frame_fps = {patient: glob.glob('data/'+self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
                               for patient in self.patient_keys}
 
         if joint_transform:
@@ -168,7 +155,7 @@ class ImageToImage3D(Dataset):
         frame_fps = sorted(self.all_frame_fps[patient], key=lambda x: int(os.path.basename(x).split('.')[0]))
 
         # read image
-        image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps])
+        image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps]).astype(np.float32)
 
         # read mask image
         mask = self.get_mask(patient, image)
@@ -176,7 +163,7 @@ class ImageToImage3D(Dataset):
         image = centre_crop(image, (image.shape[0], *self.crop_size))[:self.num_slices]
         mask = centre_crop(mask, (mask.shape[0], *self.crop_size))[:self.num_slices]
 
-        image = image / np.max(image)
+        # image = image / np.max(image)
 
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)

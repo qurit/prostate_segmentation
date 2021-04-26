@@ -1,4 +1,7 @@
 import os
+import torch
+import matplotlib.pyplot as plt
+import elasticdeform
 import json
 import pickle
 import logging
@@ -9,7 +12,7 @@ from datetime import datetime
 from seg_3d.losses import get_loss_criterion
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.evaluation.evaluator import Evaluator
-from seg_3d.data.dataset import ImageToImage3D
+from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
 from seg_3d.config import get_cfg
 from seg_3d.seg_utils import EarlyStopping, seed_all
 import seg_3d.modeling.backbone.unet
@@ -32,7 +35,7 @@ logger = logging.getLogger("detectron2")
 def setup_config():
     cfg = get_cfg()
 
-    cfg.MODEL.DEVICE = "cpu"  # "cuda:0"
+    cfg.MODEL.DEVICE = "cuda:0"
     cfg.SEED = 99
 
     # pipeline modes
@@ -40,19 +43,19 @@ def setup_config():
     cfg.EVAL_ONLY = False
     cfg.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
     cfg.TEST.EVAL_METRICS = ["dice_score", "iou", "f1"]  # metrics which get computed during eval
-    cfg.EARLY_STOPPING.PATIENCE = 10  # set to 0 to disable
+    cfg.EARLY_STOPPING.PATIENCE = 100  # set to 0 to disable
     cfg.EARLY_STOPPING.MONITOR = "dice_score"
     cfg.EARLY_STOPPING.MODE = "max"
 
     # paths
-    cfg.TRAIN_DATASET_PATH = "data/image_dataset"  # "/home/yous/Desktop/ryt/image_dataset"
+    cfg.TRAIN_DATASET_PATH = "data/image_dataset"
     cfg.TEST_DATASET_PATH = "data/test_dataset"
-    cfg.OUTPUT_DIR = "seg_3d/output/test-2"
+    cfg.OUTPUT_DIR = "seg_3d/output/test-augs"
     cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY or RESUME set to True
 
     # dataset options
     cfg.DATASET.modality = "PT"
-    cfg.DATASET.rois = ["Bladder", "Inter"]
+    cfg.DATASET.rois = ["Bladder"]
     cfg.DATASET.num_slices = 128  # number of slices in axial plane
     cfg.DATASET.crop_size = (128, 128)  # size of centre crop
     cfg.DATASET.one_hot_mask = False  # False or int for num of classes
@@ -63,7 +66,7 @@ def setup_config():
     # specify UNet params which are defined in Abstract3DUNet
     cfg.UNET.in_channels = 1
     cfg.UNET.out_channels = 1
-    cfg.UNET.f_maps = 8
+    cfg.UNET.f_maps = 16
     cfg.UNET.final_sigmoid = True  # final activation used during testing, if True then apply Sigmoid, else apply Softmax
 
     # loss
@@ -74,11 +77,11 @@ def setup_config():
 
     # solver params
     cfg.SOLVER.BASE_LR = 0.001
-    cfg.SOLVER.IMS_PER_BATCH = 1
-    cfg.SOLVER.MAX_ITER = 1000
+    cfg.SOLVER.IMS_PER_BATCH = 6
+    cfg.SOLVER.MAX_ITER = 100000
     cfg.SOLVER.CHECKPOINT_PERIOD = 100  # Save a checkpoint after every this number of iterations
     cfg.SOLVER.GAMMA = 0.1
-    cfg.SOLVER.STEPS = (30000,)  # The iteration number to decrease learning rate by GAMMA
+    cfg.SOLVER.STEPS = (300, 800, 1500, 2200)  # The iteration number to decrease learning rate by GAMMA
     cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
     cfg.SOLVER.MOMENTUM = 0.9
 
@@ -96,7 +99,8 @@ def train(cfg, model):
     model.train()
 
     # get training dataset
-    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, **cfg.DATASET)
+    transform_augmentations = JointTransform2D(deform=1.2, crop=None)
+    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations, **cfg.DATASET)
     val_dataset = ImageToImage3D(dataset_path=cfg.TEST_DATASET_PATH, **cfg.DATASET)
 
     # get default optimizer (torch.optim.SGD) and scheduler
@@ -144,6 +148,7 @@ def train(cfg, model):
             storage.step()
             sample = batched_inputs["image"]
             labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
+            print(sample.shape)
 
             # do a forward pass, input is of shape (N, C, D, H, W)
             preds = model(sample).squeeze(1)
@@ -189,7 +194,7 @@ def train(cfg, model):
 def run(cfg):
     # setup logging
     setup_logger(output=cfg.OUTPUT_DIR)
-    logger.info("Environment info:\n" + collect_env_info())
+    # logger.info("Environment info:\n" + collect_env_info())
 
     path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
     with PathManager.open(path, "w") as f:
@@ -201,7 +206,7 @@ def run(cfg):
 
     # get model and load onto device
     model = build_model(cfg)
-    logger.info("Model:\n{}".format(model))
+    # logger.info("Model:\n{}".format(model))
 
     # count number of parameters for model
     net_params = model.parameters()

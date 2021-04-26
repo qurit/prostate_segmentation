@@ -26,9 +26,9 @@ class Evaluator:
                                              total=self.dataset.__len__(), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"]
-                labels = data_input["gt_mask"].to(self.device)
+                labels = data_input["gt_mask"]
 
-                preds = model(sample)
+                preds = model(sample).detach().cpu()
                 self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
 
                 # apply final activation on preds

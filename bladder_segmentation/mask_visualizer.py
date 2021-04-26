@@ -22,7 +22,7 @@ class MaskVisualizer:
             save_figs: option to save figures to disk or show them with plt.show()
         """
         if algos is None:
-            algos = list()
+            algos = [""]
         self.algos = algos
         self.crop_size = crop_size
         self.root_plot_dir = root_plot_dir
@@ -59,6 +59,13 @@ class MaskVisualizer:
             pred_mask_3d_dict: predicted bladder 3d masks for each alg should be following structure {"alg_name": 3d_array}
             dice_scores: Option to show dice score across whole volume in title, needs to be list of floats
         """
+        if not isinstance(pred_mask_3d_dict, dict) and len(self.algos) == 1:
+            pred_mask_3d_dict = {self.algos[0]: pred_mask_3d_dict}
+
+        # check self.algos matches algos in pred_mask_3d_dict
+        for a in self.algos:
+            assert a in pred_mask_3d_dict.keys(), "pred_mask_3d_dict keys must exist in self.algos"
+
         # check if directory to store patient plots exists
         patient_plot_dir = os.path.join(self.root_plot_dir, patient)
         if self.save_figs and not os.path.isdir(patient_plot_dir):

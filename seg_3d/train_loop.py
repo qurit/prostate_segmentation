@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from detectron2.utils.file_io import PathManager
 from detectron2.utils.collect_env import collect_env_info
 from detectron2.modeling import build_model
-from detectron2.solver import build_lr_scheduler, build_optimizer
+from detectron2.solver import build_lr_scheduler
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from detectron2.utils.logger import setup_logger
@@ -29,16 +29,16 @@ from detectron2.data.samplers import TrainingSampler
 logger = logging.getLogger("detectron2")
 
 
-# TODO:
-# - switch from default optim
-# - could load up all scans into memory
 def train(cfg, model):
     model.train()
 
-    # get training dataset
+    # get training and validation datasets
     transform_augmentations = JointTransform2D(deform=1.2, crop=None)
-    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations, **cfg.DATASET)
-    val_dataset = ImageToImage3D(dataset_path=cfg.TEST_DATASET_PATH, **cfg.DATASET)
+    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations,
+                                   num_patients=cfg.TRAIN_NUM_PATIENTS, **cfg.DATASET)
+    val_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, num_patients=cfg.VAL_NUM_PATIENTS,
+                                 patient_keys=train_dataset.excluded_patients, **cfg.DATASET)
+    logger.info("Patient keys excluded from train-val split: {}".format(val_dataset.excluded_patients))
 
     # get optimizer specified in config file
     optimizer = get_optimizer(cfg)(model.parameters(), **cfg.SOLVER.PARAMS)

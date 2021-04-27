@@ -49,15 +49,19 @@ def setup_config():
     cfg.LOSS.PARAMS.bce_weight = 0.0
     cfg.LOSS.PARAMS.dice_weight = 1.0
 
-    # solver params
-    cfg.SOLVER.BASE_LR = 0.001
+    # optim
+    cfg.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim
+    cfg.SOLVER.PARAMS.lr = 0.001
+    cfg.SOLVER.PARAMS.weight_decay = 0
+    # cfg.SOLVER.PARAMS.momentum = 0.9
     cfg.SOLVER.IMS_PER_BATCH = 3
     cfg.SOLVER.MAX_ITER = 1000
+
+    # lr scheduler params
     cfg.SOLVER.CHECKPOINT_PERIOD = 100  # Save a checkpoint after every this number of iterations
     cfg.SOLVER.GAMMA = 0.1
     cfg.SOLVER.STEPS = (30000,)  # The iteration number to decrease learning rate by GAMMA
     cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
-    cfg.SOLVER.MOMENTUM = 0.9
 
     # make a default dir
     if not cfg.OUTPUT_DIR:

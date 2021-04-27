@@ -8,11 +8,10 @@ import logging
 import numpy as np
 from time import time
 
-from seg_3d.losses import get_loss_criterion
+from seg_3d.losses import get_loss_criterion, get_optimizer
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
-from seg_3d.config import get_cfg
 from seg_3d.seg_utils import EarlyStopping, seed_all
 from seg_3d.setup_config import setup_config
 
@@ -41,8 +40,8 @@ def train(cfg, model):
     train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations, **cfg.DATASET)
     val_dataset = ImageToImage3D(dataset_path=cfg.TEST_DATASET_PATH, **cfg.DATASET)
 
-    # get default optimizer (torch.optim.SGD) and scheduler
-    optimizer = build_optimizer(cfg, model)
+    # get optimizer specified in config file
+    optimizer = get_optimizer(cfg)(model.parameters(), **cfg.SOLVER.PARAMS)
     scheduler = build_lr_scheduler(cfg, optimizer)
 
     # init loss criterion
@@ -55,7 +54,6 @@ def train(cfg, model):
 
     # init checkpointers
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
-    # TODO: test if continue from iteration when resume=True
     start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=cfg.RESUME).get("iteration", -1) + 1)
     max_iter = cfg.SOLVER.MAX_ITER
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
@@ -107,7 +105,7 @@ def train(cfg, model):
                 # check early stopping
                 if early_stopping.check_early_stopping(results["metrics"]):
                     # update best model
-                    periodic_checkpointer.save(name="model_best", **results["metrics"])
+                    periodic_checkpointer.save(name="model_best", iteration=iteration, **results["metrics"])
                     # save inference results
                     with open(os.path.join(cfg.OUTPUT_DIR, 'inference.pk'), 'wb') as f:
                         pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)

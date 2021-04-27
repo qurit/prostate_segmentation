@@ -55,16 +55,21 @@ class JointTransform2D:
         p_flip: float, the probability of performing a random horizontal flip.
     """
 
-    def __init__(self, crop=(100, 100), p_flip=0.5, deform=None):
+    def __init__(self, crop=(100, 100), p_flip=0.5, deform=None, div_by_max=True):
 
         self.crop = crop
         self.p_flip = p_flip
         if deform:
             self.deform = lambda x, y: elasticdeform.deform_random_grid([x, y], sigma=deform)
         else:
-            self.deform = deform
+            self.deform = lambda x, y: x, y
+        self.div_by_max = div_by_max
 
     def __call__(self, image, mask):
+
+        # divide by scan max
+        if self.div_by_max:
+            image = image / np.max(image)
 
         # elastic deform on numpy arrays
         if self.deform:
@@ -162,8 +167,6 @@ class ImageToImage3D(Dataset):
 
         image = centre_crop(image, (image.shape[0], *self.crop_size))[:self.num_slices]
         mask = centre_crop(mask, (mask.shape[0], *self.crop_size))[:self.num_slices]
-
-        # image = image / np.max(image)
 
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)

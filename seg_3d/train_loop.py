@@ -8,6 +8,7 @@ import logging
 import numpy as np
 from time import time
 
+import seg_3d
 from seg_3d.losses import get_loss_criterion, get_optimizer
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.evaluation.evaluator import Evaluator
@@ -26,9 +27,6 @@ from detectron2.utils.logger import setup_logger
 from detectron2.data.samplers import TrainingSampler
 
 
-logger = logging.getLogger("detectron2")
-
-
 def train(cfg, model):
     model.train()
 
@@ -39,6 +37,9 @@ def train(cfg, model):
     val_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, num_patients=cfg.VAL_NUM_PATIENTS,
                                  patient_keys=train_dataset.excluded_patients, **cfg.DATASET)
     logger.info("Patient keys excluded from train-val split: {}".format(val_dataset.excluded_patients))
+
+    # setup logger for detectron2 modules
+    setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")
 
     # get optimizer specified in config file
     optimizer = get_optimizer(cfg)(model.parameters(), **cfg.SOLVER.PARAMS)
@@ -54,6 +55,7 @@ def train(cfg, model):
 
     # init checkpointers
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
+    checkpointer.logger = logging.getLogger("detectron2.checkpoint")
     start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=cfg.RESUME).get("iteration", -1) + 1)
     max_iter = cfg.SOLVER.MAX_ITER
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
@@ -128,8 +130,6 @@ def train(cfg, model):
 
 
 def run(cfg):
-    # setup logging
-    setup_logger(output=cfg.OUTPUT_DIR)
     # logger.info("Environment info:\n" + collect_env_info())
 
     path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
@@ -157,6 +157,15 @@ def run(cfg):
 
 
 if __name__ == '__main__':
+    # setup config
     cfg = setup_config()
+
+    # setup logging
+    setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
+    logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
+
+    # create directory to store output files
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+
+    # run train loop
     run(cfg)

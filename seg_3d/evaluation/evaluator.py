@@ -12,7 +12,7 @@ class Evaluator:
         self.loss = loss
         self.dataset = dataset
         self.metric_list = metric_list
-        self.logger = logging.getLogger("detectron2.evaluation")
+        self.logger = logging.getLogger(__name__)
 
     def evaluate(self, model):
         self.logger.info("Starting inference on dataset of size {}...".format(self.dataset.__len__()))

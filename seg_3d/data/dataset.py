@@ -1,4 +1,5 @@
 # original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/dataset.py
+import logging
 import os
 import json
 import glob
@@ -132,6 +133,7 @@ class ImageToImage3D(Dataset):
         self.crop_size = crop_size
         self.one_hot_mask = one_hot_mask
         self.num_patients = num_patients  # used for train-val-test split
+        self.logger = logging.getLogger(__name__)
 
         with open(os.path.join(dataset_path, "global_dict.json")) as file_obj:
             self.dataset_dict = json.load(file_obj)

@@ -79,9 +79,6 @@ class JointTransform2D:
         image = F.to_tensor(image)
         mask = F.to_tensor(mask)
 
-        # # transforming to PIL image
-        # image, mask = F.to_pil_image(image), F.to_pil_image(mask)
-
         # random crop
         if self.crop:
             i, j, h, w = T.RandomCrop.get_params(image, self.crop)
@@ -160,13 +157,13 @@ class ImageToImage3D(Dataset):
         frame_fps = sorted(self.all_frame_fps[patient], key=lambda x: int(os.path.basename(x).split('.')[0]))
 
         # read image
-        image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps]).astype(np.float32)
+        image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps][:self.num_slices]).astype(np.float32)
 
         # read mask image
         mask = self.get_mask(patient, image)
 
-        image = centre_crop(image, (image.shape[0], *self.crop_size))[:self.num_slices]
-        mask = centre_crop(mask, (mask.shape[0], *self.crop_size))[:self.num_slices]
+        image = centre_crop(image, (image.shape[0], *self.crop_size))
+        mask = centre_crop(mask, (mask.shape[0], self.num_slices, *self.crop_size))
 
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)
@@ -190,12 +187,12 @@ class ImageToImage3D(Dataset):
         roi_data = [(roi, self.dataset_dict[patient][self.modality]['rois'][roi]) for roi in self.rois if roi in patient_rois]
 
         mask = {roi[0]: np.asarray(
-            [contour2mask(roi[1][frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))]
+            [contour2mask(roi[1][frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))][:self.num_slices]
             ) for roi in roi_data}
         
         if 'Tumor' in self.rois:
             tumor_keys = [x for x in mask.keys() if 'Tumor' in x]
-            mask['Tumors'] = np.zeros_like(mask[tumors[0]])
+            mask['Tumors'] = np.zeros_like(mask[tumor_keys[0]])
             for tum in tumor_keys:
                 mask['Tumors'] = mask['Tumors'] + mask[tum]
                 del mask[tum]

@@ -87,13 +87,12 @@ def train(cfg, model):
             storage.step()
             sample = batched_inputs["image"]
             labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
-            print(sample.shape)
-
+            
             # do a forward pass, input is of shape (N, C, D, H, W)
             preds = model(sample).squeeze(1)
 
             optimizer.zero_grad()
-            training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+            training_loss = loss(preds, labels.long())  # https://github.com/wolny/pytorch-3dunet#training-tips
             training_loss.backward()
             optimizer.step()
 

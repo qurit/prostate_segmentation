@@ -110,6 +110,20 @@ class BCEDiceLoss(nn.Module):
     def forward(self, input, target):
         return self.bce_weight * self.bce(input, target) + self.dice_weight * self.dice(input, target)
 
+@LOSS_REGISTRY.register()
+class CEDiceLoss(nn.Module):
+    """Linear combination of BCE and Dice losses"""
+
+    def __init__(self, ce_weight, dice_weight):
+        super(CEDiceLoss, self).__init__()
+        self.ce_weight = ce_weight
+        self.cross_entropy = nn.CrossEntropyLoss()
+        self.dice_weight = dice_weight
+        self.dice = DiceLoss()
+
+    def forward(self, input, target):
+        return self.ce_weight * self.cross_entropy(input, target) + self.dice_weight * self.dice(input, target)
+
 
 @LOSS_REGISTRY.register()
 class WeightedCrossEntropyLoss(nn.Module):
@@ -209,7 +223,8 @@ def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
     """
 
     # input and target shapes must match
-    assert input.size() == target.size(), "'input' and 'target' must have the same shape"
+    if input.size() != target.size():
+        target = torch.nn.functional.one_hot(target).view(input.size())
 
     input = flatten(input)
     target = flatten(target)

@@ -15,7 +15,7 @@ def setup_config():
     # pipeline modes
     cfg.RESUME = False  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
-    cfg.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
+    cfg.TEST.EVAL_PERIOD = 2  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
     cfg.TEST.EVAL_METRICS = ["dice_score", "iou", "f1"]  # metrics which get computed during eval
     cfg.EARLY_STOPPING.PATIENCE = 10  # set to 0 to disable
     cfg.EARLY_STOPPING.MONITOR = "dice_score"
@@ -46,14 +46,14 @@ def setup_config():
     cfg.MODEL.BACKBONE.NAME = "UNet3D"
     # specify UNet params which are defined in Abstract3DUNet
     cfg.UNET.in_channels = 1
-    cfg.UNET.out_channels = 1
+    cfg.UNET.out_channels = 3
     cfg.UNET.f_maps = 16
     cfg.UNET.final_sigmoid = True  # final activation used during testing, if True then apply Sigmoid, else apply Softmax
 
     # loss
-    cfg.LOSS.FN = "BCEDiceLoss"  # available loss functions are inside losses.py
+    cfg.LOSS.FN = "CEDiceLoss"  # available loss functions are inside losses.py
     # specify loss params (if any)
-    cfg.LOSS.PARAMS.bce_weight = 1.0
+    cfg.LOSS.PARAMS.ce_weight = 1.0
     cfg.LOSS.PARAMS.dice_weight = 1.0
 
     # solver params

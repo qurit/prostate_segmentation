@@ -1,4 +1,5 @@
 # original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/dataset.py
+import logging
 import os
 import json
 import glob
@@ -127,7 +128,8 @@ class ImageToImage3D(Dataset):
     """
 
     def __init__(self, dataset_path: str, modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
-                 patient_keys: List[str] = None, joint_transform: Callable = None, one_hot_mask: int = False) -> None:
+                 patient_keys: List[str] = None, joint_transform: Callable = None, one_hot_mask: int = False,
+                 num_patients: int = None) -> None:
         self.dataset_path = dataset_path
         self.modality = modality
         self.patient_keys = patient_keys
@@ -135,15 +137,23 @@ class ImageToImage3D(Dataset):
         self.num_slices = num_slices
         self.crop_size = crop_size
         self.one_hot_mask = one_hot_mask
+        self.num_patients = num_patients  # used for train-val-test split
+        self.logger = logging.getLogger(__name__)
 
         with open(os.path.join(dataset_path, "global_dict.json")) as file_obj:
             self.dataset_dict = json.load(file_obj)
 
         # if no patients specified then select all from dataset
         if patient_keys is None:
-            self.patient_keys = self.dataset_dict.keys()
+            self.patient_keys = list(self.dataset_dict.keys())
 
-        self.all_frame_fps = {patient: glob.glob('data/'+self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
+        # sample select patients if num_patients specified
+        if num_patients is not None:
+            selected_patients = np.random.choice(self.patient_keys, size=self.num_patients, replace=False)
+            self.excluded_patients = list(set(self.patient_keys) - set(selected_patients))
+            self.patient_keys = selected_patients
+
+        self.all_frame_fps = {patient: glob.glob('data/' + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
                               for patient in self.patient_keys}
 
         if joint_transform:
@@ -168,6 +178,11 @@ class ImageToImage3D(Dataset):
         image = centre_crop(image, (image.shape[0], *self.crop_size))[:self.num_slices]
         mask = centre_crop(mask, (mask.shape[0], *self.crop_size))[:self.num_slices]
 
+        # clip values if modality is CT, no preprocessing of values necessary for PET
+        if self.modality == "CT":
+            image[image > 150] = 150
+            image[image < -150] = -150
+  
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)
 

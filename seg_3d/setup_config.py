@@ -9,7 +9,7 @@ import seg_3d.modeling.meta_arch.segnet
 def setup_config():
     cfg = get_cfg()
 
-    cfg.MODEL.DEVICE = "cpu"  # "cuda:0"
+    cfg.MODEL.DEVICE = "cuda:0"
     cfg.SEED = 99
 
     # pipeline modes
@@ -31,10 +31,17 @@ def setup_config():
     cfg.TRAIN_NUM_PATIENTS = 40
     cfg.VAL_NUM_PATIENTS = 15
     cfg.DATASET.modality = "PT"
-    cfg.DATASET.rois = ["Bladder"]
+    cfg.DATASET.rois = ["Bladder", "Tumor", "Tumor2", "Tumor3"]
     cfg.DATASET.num_slices = 128  # number of slices in axial plane
     cfg.DATASET.crop_size = (128, 128)  # size of centre crop
     cfg.DATASET.one_hot_mask = False  # False or int for num of classes
+
+
+    # transform options
+    cfg.ELASTIC_DEFORM_SD = 1.
+    cfg.CROP_SIZE = None
+    cfg.P_FLIP = 0.5
+    cfg.DIV_BY_MAX = True
 
     # model architecture
     cfg.MODEL.META_ARCHITECTURE = "SemanticSegNet"
@@ -42,27 +49,27 @@ def setup_config():
     # specify UNet params which are defined in Abstract3DUNet
     cfg.UNET.in_channels = 1
     cfg.UNET.out_channels = 1
-    cfg.UNET.f_maps = 8
+    cfg.UNET.f_maps = 16
     cfg.UNET.final_sigmoid = True  # final activation used during testing, if True then apply Sigmoid, else apply Softmax
 
     # loss
     cfg.LOSS.FN = "BCEDiceLoss"  # available loss functions are inside losses.py
     # specify loss params (if any)
-    cfg.LOSS.PARAMS.bce_weight = 0.0
+    cfg.LOSS.PARAMS.bce_weight = 1.0
     cfg.LOSS.PARAMS.dice_weight = 1.0
 
     # optim
     cfg.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim
-    cfg.SOLVER.PARAMS.lr = 0.001
+    cfg.SOLVER.PARAMS.lr = 0.0001
     cfg.SOLVER.PARAMS.weight_decay = 0
     # cfg.SOLVER.PARAMS.momentum = 0.9
-    cfg.SOLVER.IMS_PER_BATCH = 3
-    cfg.SOLVER.MAX_ITER = 1000
-    cfg.SOLVER.CHECKPOINT_PERIOD = 100  # Save a checkpoint after every this number of iterations
+    cfg.SOLVER.IMS_PER_BATCH = 5
+    cfg.SOLVER.MAX_ITER = 100000
+    cfg.SOLVER.CHECKPOINT_PERIOD =500  # Save a checkpoint after every this number of iterations
 
     # lr scheduler params
     cfg.SOLVER.GAMMA = 0.1
-    cfg.SOLVER.STEPS = (30000,)  # The iteration number to decrease learning rate by GAMMA
+    cfg.SOLVER.STEPS = (3000,)  # The iteration number to decrease learning rate by GAMMA
     cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
 
     # make a default dir

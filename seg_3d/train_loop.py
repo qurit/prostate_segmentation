@@ -31,7 +31,7 @@ def train(cfg, model):
     model.train()
 
     # get training and validation datasets
-    transform_augmentations = JointTransform2D(deform=1.2, crop=None)
+    transform_augmentations = JointTransform2D(crop=cfg.CROP_SIZE, p_flip=cfg.P_FLIP, deform=cfg.ELASTIC_DEFORM_SD)
     train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations,
                                    num_patients=cfg.TRAIN_NUM_PATIENTS, **cfg.DATASET)
     val_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, num_patients=cfg.VAL_NUM_PATIENTS,

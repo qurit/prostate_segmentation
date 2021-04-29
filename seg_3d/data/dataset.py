@@ -56,16 +56,21 @@ class JointTransform2D:
         p_flip: float, the probability of performing a random horizontal flip.
     """
 
-    def __init__(self, crop=(100, 100), p_flip=0.5, deform=None):
+    def __init__(self, crop=(100, 100), p_flip=0.5, deform=None, div_by_max=True):
 
         self.crop = crop
         self.p_flip = p_flip
         if deform:
             self.deform = lambda x, y: elasticdeform.deform_random_grid([x, y], sigma=deform)
         else:
-            self.deform = deform
+            self.deform = lambda x, y: x, y
+        self.div_by_max = div_by_max
 
     def __call__(self, image, mask):
+
+        # divide by scan max
+        if self.div_by_max:
+            image = image / np.max(image)
 
         # elastic deform on numpy arrays
         if self.deform:
@@ -173,13 +178,11 @@ class ImageToImage3D(Dataset):
         image = centre_crop(image, (image.shape[0], *self.crop_size))[:self.num_slices]
         mask = centre_crop(mask, (mask.shape[0], *self.crop_size))[:self.num_slices]
 
-        # image = image / np.max(image)
-
         # clip values if modality is CT, no preprocessing of values necessary for PET
         if self.modality == "CT":
             image[image > 150] = 150
             image[image < -150] = -150
-
+  
         if self.joint_transform:
             image, mask = self.joint_transform(image, mask)
 
@@ -197,13 +200,25 @@ class ImageToImage3D(Dataset):
     def get_mask(self, patient, image):
 
         img_size = np.shape(image)
-        rois = [self.dataset_dict[patient][self.modality]['rois'][roi] for roi in self.rois]
-        mask = np.asarray(
-            [
-                [contour2mask(roi[frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))
-            ] for roi in rois]
-        )
 
+        patient_rois = self.dataset_dict[patient][self.modality]['rois'].keys()
+        roi_data = [(roi, self.dataset_dict[patient][self.modality]['rois'][roi]) for roi in self.rois if roi in patient_rois]
+
+        mask = {roi[0]: np.asarray(
+            [contour2mask(roi[1][frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))]
+            ) for roi in roi_data}
+        
+        if 'Tumor' in self.rois:
+            tumor_keys = [x for x in mask.keys() if 'Tumor' in x]
+            mask['Tumors'] = np.zeros_like(mask[tumors[0]])
+            for tum in tumor_keys:
+                mask['Tumors'] = mask['Tumors'] + mask[tum]
+                del mask[tum]
+
+            mask['Tumors'][mask['Tumors'] > 1] = 1
+            mask['Bladder'][mask['Tumors'] == 1] = 0
+
+        mask = np.asarray(list(mask.values()))
         mask = np.concatenate([[np.zeros(mask.shape[1:])], mask], axis=0).argmax(axis=0)
 
         return mask

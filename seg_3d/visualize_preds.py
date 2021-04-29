@@ -23,4 +23,4 @@ def visualize_preds(output_dir, crop_size, inference_fp="inference.pk"):
 
 
 if __name__ == '__main__':
-    visualize_preds("seg_3d/output/test-4", (128, 128))
+    visualize_preds("seg_3d/output/test-augs", (128, 128))

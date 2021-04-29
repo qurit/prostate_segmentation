@@ -8,11 +8,11 @@ import logging
 import numpy as np
 from time import time
 
-from seg_3d.losses import get_loss_criterion
+import seg_3d
+from seg_3d.losses import get_loss_criterion, get_optimizer
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
-from seg_3d.config import get_cfg
 from seg_3d.seg_utils import EarlyStopping, seed_all
 from seg_3d.setup_config import setup_config
 
@@ -20,30 +20,29 @@ from torch.utils.data import DataLoader
 from detectron2.utils.file_io import PathManager
 from detectron2.utils.collect_env import collect_env_info
 from detectron2.modeling import build_model
-from detectron2.solver import build_lr_scheduler, build_optimizer
+from detectron2.solver import build_lr_scheduler
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from detectron2.utils.logger import setup_logger
 from detectron2.data.samplers import TrainingSampler
 
 
-logger = logging.getLogger("detectron2")
-
-
-# TODO:
-# - switch from default optim
-# - could load up all scans into memory
 def train(cfg, model):
     model.train()
 
-    # get training dataset
-    transform_augmentations = JointTransform2D(crop=cfg.CROP_SIZE, p_flip=cfg.P_FLIP, deform=cfg.ELASTIC_DEFORM_SD, )
-    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations, **cfg.DATASET)
-    val_dataset = ImageToImage3D(dataset_path=cfg.TEST_DATASET_PATH, **cfg.DATASET)
+    # get training and validation datasets
+    transform_augmentations = JointTransform2D(crop=cfg.CROP_SIZE, p_flip=cfg.P_FLIP, deform=cfg.ELASTIC_DEFORM_SD)
+    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations,
+                                   num_patients=cfg.TRAIN_NUM_PATIENTS, **cfg.DATASET)
+    val_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, num_patients=cfg.VAL_NUM_PATIENTS,
+                                 patient_keys=train_dataset.excluded_patients, **cfg.DATASET)
+    logger.info("Patient keys excluded from train-val split: {}".format(val_dataset.excluded_patients))
 
-    # get default optimizer (torch.optim.SGD) and scheduler
-    # optimizer = build_optimizer(cfg, model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.SOLVER.BASE_LR)
+    # setup logger for detectron2 modules
+    setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")
+
+    # get optimizer specified in config file
+    optimizer = get_optimizer(cfg)(model.parameters(), **cfg.SOLVER.PARAMS)
     scheduler = build_lr_scheduler(cfg, optimizer)
 
     # init loss criterion
@@ -56,7 +55,7 @@ def train(cfg, model):
 
     # init checkpointers
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
-    # TODO: test if continue from iteration when resume=True
+    checkpointer.logger = logging.getLogger("detectron2.checkpoint")
     start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=cfg.RESUME).get("iteration", -1) + 1)
     max_iter = cfg.SOLVER.MAX_ITER
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
@@ -107,7 +106,7 @@ def train(cfg, model):
                 # check early stopping
                 if early_stopping.check_early_stopping(results["metrics"]):
                     # update best model
-                    periodic_checkpointer.save(name="model_best", **results["metrics"])
+                    periodic_checkpointer.save(name="model_best", iteration=iteration, **results["metrics"])
                     # save inference results
                     with open(os.path.join(cfg.OUTPUT_DIR, 'inference.pk'), 'wb') as f:
                         pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -130,8 +129,6 @@ def train(cfg, model):
 
 
 def run(cfg):
-    # setup logging
-    setup_logger(output=cfg.OUTPUT_DIR)
     # logger.info("Environment info:\n" + collect_env_info())
 
     path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
@@ -159,6 +156,15 @@ def run(cfg):
 
 
 if __name__ == '__main__':
+    # setup config
     cfg = setup_config()
+
+    # setup logging
+    setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
+    logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
+
+    # create directory to store output files
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+
+    # run train loop
     run(cfg)

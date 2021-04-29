@@ -22,12 +22,14 @@ def setup_config():
     cfg.EARLY_STOPPING.MODE = "max"
 
     # paths
-    cfg.TRAIN_DATASET_PATH = "data/image_dataset"  # "/home/yous/Desktop/ryt/image_dataset"
+    cfg.TRAIN_DATASET_PATH = "data/image_dataset"
     cfg.TEST_DATASET_PATH = "data/test_dataset"
     cfg.OUTPUT_DIR = "seg_3d/output/test-3"
     cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY or RESUME set to True
 
     # dataset options
+    cfg.TRAIN_NUM_PATIENTS = 40
+    cfg.VAL_NUM_PATIENTS = 15
     cfg.DATASET.modality = "PT"
     cfg.DATASET.rois = ["Bladder", "Tumor", "Tumor2", "Tumor3"]
     cfg.DATASET.num_slices = 128  # number of slices in axial plane
@@ -56,15 +58,19 @@ def setup_config():
     cfg.LOSS.PARAMS.ce_weight = 1.0
     cfg.LOSS.PARAMS.dice_weight = 1.0
 
-    # solver params
-    cfg.SOLVER.BASE_LR = 0.0001
+    # optim
+    cfg.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim
+    cfg.SOLVER.PARAMS.lr = 0.0001
+    cfg.SOLVER.PARAMS.weight_decay = 0
+    # cfg.SOLVER.PARAMS.momentum = 0.9
     cfg.SOLVER.IMS_PER_BATCH = 5
     cfg.SOLVER.MAX_ITER = 100000
-    cfg.SOLVER.CHECKPOINT_PERIOD = 500  # Save a checkpoint after every this number of iterations
+    cfg.SOLVER.CHECKPOINT_PERIOD =500  # Save a checkpoint after every this number of iterations
+
+    # lr scheduler params
     cfg.SOLVER.GAMMA = 0.1
     cfg.SOLVER.STEPS = (3000,)  # The iteration number to decrease learning rate by GAMMA
     cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
-    cfg.SOLVER.MOMENTUM = 0.9
 
     # make a default dir
     if not cfg.OUTPUT_DIR:

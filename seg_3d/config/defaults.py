@@ -9,6 +9,7 @@ _C.clear()
 _C.MODEL = CN()
 _C.MODEL.BACKBONE = CN()
 _C.SOLVER = SOLVER_PARAMS
+_C.SOLVER.PARAMS = CN()
 _C.TEST = CN()
 
 # eval only mode

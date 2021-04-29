@@ -15,7 +15,7 @@ class EarlyStopping:
         self.patience = patience  # set to 0 to disable
         self.mode = mode
         assert mode in ["max", "min"], "\'mode\' must be either \'max\' or \'min\'"
-        self.logger = logging.getLogger("detectron2.early_stopping")
+        self.logger = logging.getLogger(__name__)
         self.fall_short_count = 0
         self.best = None
         self.triggered = False

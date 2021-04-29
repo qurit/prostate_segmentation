@@ -299,3 +299,15 @@ class SkipLastTargetChannelWrapper(nn.Module):
             # squeeze channel dimension if singleton
             target = torch.squeeze(target, dim=1)
         return self.loss(input, target)
+
+
+# register all optim from torch.optim to a registry
+OPTIM_REGISTRY = Registry('OPTIM')
+dir_optim = dir(torch.optim)
+optims = [item for item in dir_optim if item[0].isupper()]
+for optim in optims:
+    OPTIM_REGISTRY.register(eval("torch.optim." + optim))
+
+
+def get_optimizer(config):
+    return OPTIM_REGISTRY.get(config.SOLVER.OPTIM)

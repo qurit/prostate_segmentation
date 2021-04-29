@@ -114,15 +114,17 @@ class BCEDiceLoss(nn.Module):
 class CEDiceLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, ce_weight, dice_weight):
+    def __init__(self, ce_weight, dice_weight, device='cpu'):
         super(CEDiceLoss, self).__init__()
         self.ce_weight = ce_weight
-        self.cross_entropy = nn.CrossEntropyLoss()
+        self.cross_entropy = nn.CrossEntropyLoss(weight=torch.Tensor([0.,1.,1.]).to(device))
         self.dice_weight = dice_weight
-        self.dice = DiceLoss()
+        self.dice = DiceLoss(weight=torch.Tensor([0.,1.,1.]).to(device))
 
     def forward(self, input, target):
-        return self.ce_weight * self.cross_entropy(input, target) + self.dice_weight * self.dice(input, target)
+        ce = self.cross_entropy(input, target.argmax(dim=1))
+        dice = self.dice(input, target)
+        return self.ce_weight * ce + self.dice_weight * dice
 
 
 @LOSS_REGISTRY.register()
@@ -222,6 +224,8 @@ def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
          weight (torch.Tensor): Cx1 tensor of weight per channel/class
     """
 
+    input = nn.Sigmoid()(input)
+
     # input and target shapes must match
     if input.size() != target.size():
         target = torch.nn.functional.one_hot(target)
@@ -240,7 +244,11 @@ def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
 
     # here we can use standard dice (input + target).sum(-1) or extension (see V-Net) (input^2 + target^2).sum(-1)
     denominator = (input * input).sum(-1) + (target * target).sum(-1)
-    return 2 * (intersect / denominator.clamp(min=epsilon))
+
+    dice = 2 * (intersect / denominator.clamp(min=epsilon))
+
+    print('Dice scores - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(*list(dice.detach().cpu().numpy())))
+    return dice
 
 
 def flatten(tensor):

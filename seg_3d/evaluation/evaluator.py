@@ -25,15 +25,15 @@ class Evaluator:
             for idx, data_input in tqdm.tqdm(enumerate(DataLoader(self.dataset, batch_size=1)),
                                              total=self.dataset.__len__(), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
-                sample = data_input["image"]
-                labels = data_input["gt_mask"].squeeze(1).long()
+                sample = data_input["image"].to(self.device)
+                labels = data_input["gt_mask"].squeeze(1).long().to(self.device)
 
-                preds = model(sample).detach().cpu()
-                print(sample.shape, labels.shape, preds.shape)
+                preds = model(sample).detach()
                 self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
 
                 # apply final activation on preds
                 preds = model.final_activation(preds)
+                print(model.final_activation)
                 self.metric_list(preds, labels)
 
                 # print out results for patient
@@ -42,8 +42,8 @@ class Evaluator:
                 for key in patient_metrics:
                     self.logger.info("{}: {}".format(key, patient_metrics[key]))
 
-                inference_dict[patient] = {"gt": labels.numpy(),
-                                           "preds": preds.numpy(),
+                inference_dict[patient] = {"gt": labels.detach().cpu().numpy(),
+                                           "preds": preds.detach().cpu().numpy(),
                                            "image": data_input["image"].numpy(),
                                            "metrics": patient_metrics}
 

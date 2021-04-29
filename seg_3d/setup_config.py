@@ -16,8 +16,8 @@ def setup_config():
     cfg.RESUME = False  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
     cfg.TEST.EVAL_PERIOD = 1  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
-    cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "classwise_iou", "classwise_f1"]  # metrics which get computed during eval
-    cfg.EARLY_STOPPING.PATIENCE = 10  # set to 0 to disable
+    cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "classwise_f1"]  # metrics which get computed during eval
+    cfg.EARLY_STOPPING.PATIENCE = 200  # set to 0 to disable
     cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score"
     cfg.EARLY_STOPPING.MODE = "max"
 
@@ -38,9 +38,9 @@ def setup_config():
 
 
     # transform options
-    cfg.ELASTIC_DEFORM_SD = 1.
+    cfg.ELASTIC_DEFORM_SD = None
     cfg.CROP_SIZE = None
-    cfg.P_FLIP = 0.5
+    cfg.P_FLIP = None
     cfg.DIV_BY_MAX = True
 
     # model architecture
@@ -57,6 +57,7 @@ def setup_config():
     # specify loss params (if any)
     cfg.LOSS.PARAMS.ce_weight = 1.0
     cfg.LOSS.PARAMS.dice_weight = 1.0
+    cfg.LOSS.PARAMS.device = "cuda:0"
 
     # optim
     cfg.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim

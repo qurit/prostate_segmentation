@@ -61,32 +61,37 @@ class JointTransform2D:
         self.crop = crop
         self.p_flip = p_flip
         if deform:
-            self.deform = lambda x, y: elasticdeform.deform_random_grid([x, y], sigma=deform)
+            self.deform = lambda x: elasticdeform.deform_random_grid(x, sigma=deform)
         else:
-            self.deform = lambda x, y: x, y
+            self.deform = lambda x: x
         self.div_by_max = div_by_max
 
-    def __call__(self, image, mask):
+    def __call__(self, image, masks):
 
         # divide by scan max
         if self.div_by_max:
             image = image / np.max(image)
+        
+        orig_data = [image, masks]
 
         # elastic deform on numpy arrays
         if self.deform:
-            image, mask = self.deform(image, mask)
+            deformed_data = self.deform(orig_data)
+        
+        image, masks = deformed_data[0], deformed_data[1:]
         
         # transforming to tensor
         image = F.to_tensor(image)
-        mask = F.to_tensor(mask)
+        mask = torch.Tensor(np.concatenate(masks, axis=0))
 
         # random crop
         if self.crop:
             i, j, h, w = T.RandomCrop.get_params(image, self.crop)
             image, mask = F.crop(image, i, j, h, w), F.crop(mask, i, j, h, w)
 
-        if np.random.rand() < self.p_flip:
-            image, mask = F.hflip(image), F.hflip(mask)
+        if self.p_flip:
+            if np.random.rand() < self.p_flip:
+                image, mask = F.hflip(image), F.hflip(mask)
 
         
         return image, mask
@@ -125,8 +130,8 @@ class ImageToImage3D(Dataset):
     """
 
     def __init__(self, dataset_path: str, modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
-                 patient_keys: List[str] = None, joint_transform: Callable = None, one_hot_mask: int = False,
-                 num_patients: int = None) -> None:
+                joint_transform: Callable, patient_keys: List[str] = None, one_hot_mask: int = False,
+                num_patients: int = None) -> None:
         self.dataset_path = dataset_path
         self.modality = modality
         self.patient_keys = patient_keys
@@ -153,11 +158,7 @@ class ImageToImage3D(Dataset):
         self.all_frame_fps = {patient: glob.glob('data/' + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
                               for patient in self.patient_keys}
 
-        if joint_transform:
-            self.joint_transform = joint_transform
-        else:
-            # to_tensor = T.ToTensor()
-            self.joint_transform = lambda x, y: (torch.from_numpy(x), torch.from_numpy(y))
+        self.joint_transform = joint_transform
 
     def __len__(self):
         return len(self.patient_keys)
@@ -170,10 +171,10 @@ class ImageToImage3D(Dataset):
         image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps][:self.num_slices]).astype(np.float32)
 
         # read mask image
-        mask, n_classes = self.get_mask(patient, image)
+        masks_array = self.get_mask(patient, image)
 
         image = centre_crop(image, (image.shape[0], *self.crop_size))
-        mask = centre_crop(mask, (mask.shape[0], self.num_slices, *self.crop_size))
+        masks = [centre_crop(mask, (mask.shape[0], self.num_slices, *self.crop_size)) for mask in masks_array]
 
         # clip values if modality is CT, no preprocessing of values necessary for PET
         if self.modality == "CT":
@@ -181,9 +182,8 @@ class ImageToImage3D(Dataset):
             image[image < -150] = -150
   
         if self.joint_transform:
-            image, mask = self.joint_transform(image, mask)
+            image, mask = self.joint_transform(image, masks)
 
-        mask = mask.unsqueeze(0)
         if self.one_hot_mask:
             assert self.one_hot_mask > 0, 'one_hot_mask must be nonnegative'
             mask = torch.zeros((self.one_hot_mask, *mask.shape[1:])).scatter_(0, mask.long(), 1)
@@ -191,8 +191,7 @@ class ImageToImage3D(Dataset):
         return {
             "image": image.unsqueeze(0).float(),
             "gt_mask": mask.float(),
-            "patient": patient,
-            "n_classes": n_classes,
+            "patient": patient
         }
 
     def get_mask(self, patient, image):
@@ -213,17 +212,14 @@ class ImageToImage3D(Dataset):
                 tumor_mask += mask[tum]
                 del mask[tum]
 
-            if tumor_mask.sum() == 0:
-                mask = {'bladder':mask['Bladder']}
-            else:
-                tumor_mask[tumor_mask > 1] = 1
-                mask['Bladder'][tumor_mask == 1] = 0
-                mask = {'bladder':mask['Bladder'], 'tumor':tumor_mask}
+            tumor_mask[tumor_mask > 1] = 1
+            mask['Bladder'][tumor_mask == 1] = 0
+        bg = np.zeros(tumor_mask.shape)
+        bg = mask['Bladder'] + tumor_mask + 1
+        bg[bg != 1] = 0
+        masks_array = [bg, mask['Bladder'], tumor_mask]
 
-        mask_array = np.asarray(list(mask.values()))
-        mask_array = np.concatenate([[np.zeros(mask_array.shape[1:])], mask_array], axis=0).argmax(axis=0)
-
-        return mask_array, len(mask.keys())
+        return masks_array
 
 
 class Image2D(Dataset):

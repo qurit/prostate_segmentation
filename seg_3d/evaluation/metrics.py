@@ -34,7 +34,10 @@ class MetricList:
             averaged_results = {}
 
             for key, value in self.results.items():
-                value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
+                if type(value[0]) == torch.Tensor and value[0].is_cuda:
+                    value = np.asarray([x.detach().cpu().numpy() for x in value]).mean(axis=0).tolist()
+                else:
+                    value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
                 averaged_results[key] = value
 
             return averaged_results

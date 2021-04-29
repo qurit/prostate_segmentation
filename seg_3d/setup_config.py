@@ -29,7 +29,7 @@ def setup_config():
 
     # dataset options
     cfg.DATASET.modality = "PT"
-    cfg.DATASET.rois = ["Bladder"]
+    cfg.DATASET.rois = ["Bladder", "Tumor", "Tumor2", "Tumor3"]
     cfg.DATASET.num_slices = 128  # number of slices in axial plane
     cfg.DATASET.crop_size = (128, 128)  # size of centre crop
     cfg.DATASET.one_hot_mask = False  # False or int for num of classes

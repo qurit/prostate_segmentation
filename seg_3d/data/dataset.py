@@ -185,13 +185,25 @@ class ImageToImage3D(Dataset):
     def get_mask(self, patient, image):
 
         img_size = np.shape(image)
-        rois = [self.dataset_dict[patient][self.modality]['rois'][roi] for roi in self.rois]
-        mask = np.asarray(
-            [
-                [contour2mask(roi[frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))
-            ] for roi in rois]
-        )
 
+        patient_rois = self.dataset_dict[patient][self.modality]['rois'].keys()
+        roi_data = [(roi, self.dataset_dict[patient][self.modality]['rois'][roi]) for roi in self.rois if roi in patient_rois]
+
+        mask = {roi[0]: np.asarray(
+            [contour2mask(roi[1][frame], img_size[1:3]) for frame in range(len(self.all_frame_fps[patient]))]
+            ) for roi in roi_data}
+        
+        if 'Tumor' in self.rois:
+            tumor_keys = [x for x in mask.keys() if 'Tumor' in x]
+            mask['Tumors'] = np.zeros_like(mask[tumors[0]])
+            for tum in tumor_keys:
+                mask['Tumors'] = mask['Tumors'] + mask[tum]
+                del mask[tum]
+
+            mask['Tumors'][mask['Tumors'] > 1] = 1
+            mask['Bladder'][mask['Tumors'] == 1] = 0
+
+        mask = np.asarray(list(mask.values()))
         mask = np.concatenate([[np.zeros(mask.shape[1:])], mask], axis=0).argmax(axis=0)
 
         return mask

@@ -31,8 +31,8 @@ def train(cfg, model):
     model.train()
 
     # get training and validation datasets
-    transform_augmentations = JointTransform2D(crop=cfg.CROP_SIZE, p_flip=cfg.P_FLIP, deform=cfg.ELASTIC_DEFORM_SD)
-    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=transform_augmentations,
+    # transform_augmentations = JointTransform2D(crop=cfg.CROP_SIZE, p_flip=cfg.P_FLIP, deform=cfg.ELASTIC_DEFORM_SD)
+    train_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, joint_transform=None,
                                    num_patients=cfg.TRAIN_NUM_PATIENTS, **cfg.DATASET)
     val_dataset = ImageToImage3D(dataset_path=cfg.TRAIN_DATASET_PATH, num_patients=cfg.VAL_NUM_PATIENTS,
                                  patient_keys=train_dataset.excluded_patients, **cfg.DATASET)
@@ -85,13 +85,13 @@ def train(cfg, model):
 
             storage.step()
             sample = batched_inputs["image"]
-            labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
+            labels = batched_inputs["gt_mask"].squeeze(1).long().to(cfg.MODEL.DEVICE)
             
             # do a forward pass, input is of shape (N, C, D, H, W)
             preds = model(sample).squeeze(1)
 
             optimizer.zero_grad()
-            training_loss = loss(preds, labels.long())  # https://github.com/wolny/pytorch-3dunet#training-tips
+            training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
             training_loss.backward()
             optimizer.step()
 
@@ -101,7 +101,7 @@ def train(cfg, model):
             # check if need to run eval step on validation data
             if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
                 results = evaluator.evaluate(model)
-                storage.put_scalars(**results["metrics"])
+                # storage.put_scalars(**results["metrics"])
 
                 # check early stopping
                 if early_stopping.check_early_stopping(results["metrics"]):

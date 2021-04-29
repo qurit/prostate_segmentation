@@ -15,10 +15,10 @@ def setup_config():
     # pipeline modes
     cfg.RESUME = False  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
-    cfg.TEST.EVAL_PERIOD = 2  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
-    cfg.TEST.EVAL_METRICS = ["dice_score", "iou", "f1"]  # metrics which get computed during eval
+    cfg.TEST.EVAL_PERIOD = 1  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
+    cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "classwise_iou", "classwise_f1"]  # metrics which get computed during eval
     cfg.EARLY_STOPPING.PATIENCE = 10  # set to 0 to disable
-    cfg.EARLY_STOPPING.MONITOR = "dice_score"
+    cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score"
     cfg.EARLY_STOPPING.MODE = "max"
 
     # paths
@@ -63,9 +63,9 @@ def setup_config():
     cfg.SOLVER.PARAMS.lr = 0.0001
     cfg.SOLVER.PARAMS.weight_decay = 0
     # cfg.SOLVER.PARAMS.momentum = 0.9
-    cfg.SOLVER.IMS_PER_BATCH = 5
+    cfg.SOLVER.IMS_PER_BATCH = 1
     cfg.SOLVER.MAX_ITER = 100000
-    cfg.SOLVER.CHECKPOINT_PERIOD =500  # Save a checkpoint after every this number of iterations
+    cfg.SOLVER.CHECKPOINT_PERIOD = 500  # Save a checkpoint after every this number of iterations
 
     # lr scheduler params
     cfg.SOLVER.GAMMA = 0.1

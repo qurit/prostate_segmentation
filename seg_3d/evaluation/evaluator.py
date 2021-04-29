@@ -26,9 +26,10 @@ class Evaluator:
                                              total=self.dataset.__len__(), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"]
-                labels = data_input["gt_mask"]
+                labels = data_input["gt_mask"].squeeze(1).long()
 
                 preds = model(sample).detach().cpu()
+                print(sample.shape, labels.shape, preds.shape)
                 self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
 
                 # apply final activation on preds
@@ -47,8 +48,11 @@ class Evaluator:
                                            "metrics": patient_metrics}
 
         model.train()
+        averaged_results = (self.metric_list.get_results(average=True))
+
+
         self.logger.info("Inference done! Mean metric scores:")
-        self.logger.info(json.dumps(self.metric_list.get_results(average=True), indent=4))
+        self.logger.info(json.dumps(averaged_results, indent=4))
 
         # return inference dict and averaged results
         return {

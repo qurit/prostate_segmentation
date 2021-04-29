@@ -31,7 +31,13 @@ class MetricList:
         if not average:
             return self.results
         else:
-            return {key: float(np.mean(value)) for key, value in self.results.items()}
+            averaged_results = {}
+
+            for key, value in self.results.items():
+                value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
+                averaged_results[key] = value
+
+            return averaged_results
 
 
 @METRIC_REGISTRY.register()
@@ -42,7 +48,7 @@ def dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def classwise_dice_score(pred, gt):
-    return torch.mean(compute_per_channel_dice(pred.unsqueeze(0), gt.unsqueeze(0), epsilon=1e-6))
+    return torch.mean(compute_per_channel_dice(pred, gt, epsilon=1e-6))
 
 
 @METRIC_REGISTRY.register()
@@ -57,13 +63,13 @@ def classwise_iou(pred, gt):
         pred: torch.Tensor of shape (n_batch, n_classes, image.shape)
         gt: torch.LongTensor of shape (n_batch, image.shape)
     """
+
     dims = (0, *range(2, len(pred.shape)))
     gt = gt.squeeze(1).long()
     gt = torch.zeros_like(pred).scatter_(1, gt[:, None, :], 1)
     intersection = pred*gt
     union = pred + gt - intersection
-    return ((intersection.sum(dim=dims).float() + EPSILON) / (
-        union.sum(dim=dims) + EPSILON)).item()
+    return (intersection.sum(dim=dims).float() + EPSILON) / (union.sum(dim=dims) + EPSILON)
 
 
 @METRIC_REGISTRY.register()
@@ -89,7 +95,7 @@ def classwise_f1(pred, gt):
 
     precision = (true_positives + epsilon) / (selected + epsilon)
     recall = (true_positives + epsilon) / (relevant + epsilon)
-    return (2 * (precision * recall) / (precision + recall)).item()
+    return (2 * (precision * recall) / (precision + recall))
 
 
 def get_metrics(config):

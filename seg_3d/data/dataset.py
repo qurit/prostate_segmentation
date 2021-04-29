@@ -170,7 +170,7 @@ class ImageToImage3D(Dataset):
         image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps][:self.num_slices]).astype(np.float32)
 
         # read mask image
-        mask = self.get_mask(patient, image)
+        mask, n_classes = self.get_mask(patient, image)
 
         image = centre_crop(image, (image.shape[0], *self.crop_size))
         mask = centre_crop(mask, (mask.shape[0], self.num_slices, *self.crop_size))
@@ -191,7 +191,8 @@ class ImageToImage3D(Dataset):
         return {
             "image": image.unsqueeze(0).float(),
             "gt_mask": mask.float(),
-            "patient": patient
+            "patient": patient,
+            "n_classes": n_classes,
         }
 
     def get_mask(self, patient, image):
@@ -207,18 +208,22 @@ class ImageToImage3D(Dataset):
         
         if 'Tumor' in self.rois:
             tumor_keys = [x for x in mask.keys() if 'Tumor' in x]
-            mask['Tumors'] = np.zeros_like(mask[tumor_keys[0]])
+            tumor_mask = np.zeros_like(mask[tumor_keys[0]])
             for tum in tumor_keys:
-                mask['Tumors'] = mask['Tumors'] + mask[tum]
+                tumor_mask += mask[tum]
                 del mask[tum]
 
-            mask['Tumors'][mask['Tumors'] > 1] = 1
-            mask['Bladder'][mask['Tumors'] == 1] = 0
+            if tumor_mask.sum() == 0:
+                mask = {'bladder':mask['Bladder']}
+            else:
+                tumor_mask[tumor_mask > 1] = 1
+                mask['Bladder'][tumor_mask == 1] = 0
+                mask = {'bladder':mask['Bladder'], 'tumor':tumor_mask}
 
-        mask = np.asarray(list(mask.values()))
-        mask = np.concatenate([[np.zeros(mask.shape[1:])], mask], axis=0).argmax(axis=0)
+        mask_array = np.asarray(list(mask.values()))
+        mask_array = np.concatenate([[np.zeros(mask_array.shape[1:])], mask_array], axis=0).argmax(axis=0)
 
-        return mask
+        return mask_array, len(mask.keys())
 
 
 class Image2D(Dataset):

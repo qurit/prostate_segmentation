@@ -224,7 +224,10 @@ def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
 
     # input and target shapes must match
     if input.size() != target.size():
-        target = torch.nn.functional.one_hot(target).view(input.size())
+        target = torch.nn.functional.one_hot(target)
+        if target.size()[-1] != input.size()[1]:
+            target = torch.cat((target, torch.zeros((*target.size()[:-1], 1))), dim=4)
+        target = target.view(input.size())
 
     input = flatten(input)
     target = flatten(target)

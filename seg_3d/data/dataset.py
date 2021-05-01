@@ -1,22 +1,19 @@
 # original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/dataset.py
+import glob
+import json
 import logging
 import os
-import json
-import glob
-import torch
+from typing import Callable
+from typing import List, Tuple
+
 import elasticdeform
 import numpy as np
 import pydicom as dicom
-from collections import UserList
-from typing import List, Tuple
-
+import torch
 from skimage import io
-
 from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
-
-from typing import Callable
 
 from dicom_code.contour_utils import parse_dicom_image
 from utils import contour2mask, centre_crop
@@ -81,7 +78,7 @@ class JointTransform2D:
         image, masks = deformed_data[0], deformed_data[1:]
 
         # transforming to tensor
-        image = F.to_tensor(image)
+        image = torch.Tensor(image)
         mask = torch.Tensor(np.concatenate(masks, axis=0))
 
         # random crop
@@ -173,9 +170,8 @@ class ImageToImage3D(Dataset):
 
         # read mask image
         masks_array = self.get_mask(patient, image)
-
-        image = centre_crop(image, (image.shape[0], *self.crop_size))
-        masks = [centre_crop(mask, (mask.shape[0], self.num_slices, *self.crop_size)) for mask in masks_array]
+        image = centre_crop(image, (self.num_slices, *self.crop_size))
+        masks = np.asarray([centre_crop(mask, (self.num_slices, *self.crop_size)) for mask in masks_array])
 
         # clip values if modality is CT, no preprocessing of values necessary for PET
         if self.modality == "CT":

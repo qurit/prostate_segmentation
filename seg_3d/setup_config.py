@@ -24,8 +24,9 @@ def setup_config():
     # paths
     cfg.TRAIN_DATASET_PATH = "data/image_dataset"
     cfg.TEST_DATASET_PATH = "data/test_dataset"
-    cfg.OUTPUT_DIR = "seg_3d/output/test-low-lr"
-    cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY or RESUME set to True
+    cfg.OUTPUT_DIR = "seg_3d/output/test-3"
+    cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY
+    cfg.CONFIG_FILE = ""  # option to load params from a config yaml file, e.g. base config for 3D or 2D segmentation
 
     # dataset options
     cfg.TRAIN_NUM_PATIENTS = 40
@@ -35,7 +36,6 @@ def setup_config():
     cfg.DATASET.num_slices = 128  # number of slices in axial plane
     cfg.DATASET.crop_size = (128, 128)  # size of centre crop
     cfg.DATASET.one_hot_mask = False  # False or int for num of classes
-
 
     # transform options
     cfg.ELASTIC_DEFORM_SD = 1.
@@ -55,9 +55,9 @@ def setup_config():
     # loss
     cfg.LOSS.FN = "CEDiceLoss"  # available loss functions are inside losses.py
     # specify loss params (if any)
-    cfg.LOSS.PARAMS.ce_weight = 1.
-    cfg.LOSS.PARAMS.dice_weight = 3.
-    cfg.LOSS.PARAMS.device = "cuda:0"
+    cfg.LOSS.PARAMS.ce_weight = 1.0
+    cfg.LOSS.PARAMS.dice_weight = 1.0
+    cfg.LOSS.PARAMS.class_weight = [0, 1, 1]
 
     # optim
     cfg.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim

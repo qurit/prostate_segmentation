@@ -1,22 +1,19 @@
 # original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/dataset.py
+import glob
+import json
 import logging
 import os
-import json
-import glob
-import torch
+from typing import Callable
+from typing import List, Tuple
+
 import elasticdeform
 import numpy as np
 import pydicom as dicom
-from collections import UserList
-from typing import List, Tuple
-
+import torch
 from skimage import io
-
 from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
-
-from typing import Callable
 
 from dicom_code.contour_utils import parse_dicom_image
 from utils import contour2mask, centre_crop
@@ -59,11 +56,14 @@ class JointTransform2D:
     def __init__(self, crop=(100, 100), p_flip=0.5, deform=None, div_by_max=True):
 
         self.crop = crop
+        
         self.p_flip = p_flip
+        
         if deform:
             self.deform = lambda x: elasticdeform.deform_random_grid(x, sigma=deform)
         else:
             self.deform = lambda x: x
+            
         self.div_by_max = div_by_max
 
     def __call__(self, image, masks):
@@ -71,19 +71,17 @@ class JointTransform2D:
         # divide by scan max
         if self.div_by_max:
             image = image / np.max(image)
-        
-        orig_data = [image] + masks
 
-        # elastic deform on numpy arrays
-        if self.deform:
-            deformed_data = self.deform(orig_data)
-        
-        image, masks = deformed_data[0], deformed_data[1:]
-        
+        sample_data = [image] + masks
+
+        sample_data = self.deform(sample_data)
+
+        image, masks = sample_data[0], sample_data[1:]
+
         # transforming to tensor
-        image = F.to_tensor(image)
+        image = torch.Tensor(image)
         mask = torch.Tensor(np.stack(masks, axis=0))
-        
+    
         # random crop
         if self.crop:
             i, j, h, w = T.RandomCrop.get_params(image, self.crop)
@@ -93,7 +91,6 @@ class JointTransform2D:
             if np.random.rand() < self.p_flip:
                 image, mask = F.hflip(image), F.hflip(mask)
 
-        
         return image, mask
 
 
@@ -130,8 +127,8 @@ class ImageToImage3D(Dataset):
     """
 
     def __init__(self, dataset_path: str, modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
-                joint_transform: Callable, patient_keys: List[str] = None, one_hot_mask: int = False,
-                num_patients: int = None) -> None:
+                 joint_transform: Callable, patient_keys: List[str] = None, one_hot_mask: int = False,
+                 num_patients: int = None) -> None:
         self.dataset_path = dataset_path
         self.modality = modality
         self.patient_keys = patient_keys
@@ -151,7 +148,7 @@ class ImageToImage3D(Dataset):
 
         # sample select patients if num_patients specified
         if num_patients is not None:
-            selected_patients = np.random.choice(self.patient_keys, size=self.num_patients, replace=False)
+            selected_patients = np.random.choice(sorted(self.patient_keys), size=self.num_patients, replace=False)
             self.excluded_patients = list(set(self.patient_keys) - set(selected_patients))
             self.patient_keys = selected_patients
 
@@ -169,18 +166,19 @@ class ImageToImage3D(Dataset):
 
         # read image
         image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps][:self.num_slices]).astype(np.float32)
+        # keep a copy of the unmodified image
+        orig_image = np.copy(image)
 
         # read mask image
         masks_array = self.get_mask(patient, image)
-
-        image = centre_crop(image, (image.shape[0], *self.crop_size))
-        masks = [centre_crop(mask, (mask.shape[0], self.num_slices, *self.crop_size)) for mask in masks_array]
+        image = centre_crop(image, (self.num_slices, *self.crop_size))
+        masks = [centre_crop(mask, (self.num_slices, *self.crop_size)) for mask in masks_array]
 
         # clip values if modality is CT, no preprocessing of values necessary for PET
         if self.modality == "CT":
             image[image > 150] = 150
             image[image < -150] = -150
-  
+
         if self.joint_transform:
             image, mask = self.joint_transform(image, masks)
 
@@ -189,6 +187,7 @@ class ImageToImage3D(Dataset):
             mask = torch.zeros((self.one_hot_mask, *mask.shape[1:])).scatter_(0, mask.long(), 1)
 
         return {
+            "orig_image": orig_image,
             "image": image.unsqueeze(0).float(),
             "gt_mask": mask.float(),
             "patient": patient
@@ -217,7 +216,7 @@ class ImageToImage3D(Dataset):
         bg = np.zeros(tumor_mask.shape)
         bg = mask['Bladder'] + tumor_mask + 1
         bg[bg != 1] = 0
-        masks_array = [bg, mask['Bladder'], tumor_mask]
+        masks_array = [bg, mask['Bladder'], tumor_mask]  # FIXME: hardcoded
 
         return masks_array
 

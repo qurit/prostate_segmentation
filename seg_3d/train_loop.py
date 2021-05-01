@@ -1,31 +1,29 @@
-import os
-import torch
-import matplotlib.pyplot as plt
-import elasticdeform
 import json
-import pickle
 import logging
+import os
+import pickle
+import random
 import numpy as np
 import segmentation_models_pytorch as smp
 from time import time
 
-import seg_3d
-from seg_3d.losses import get_loss_criterion, get_optimizer
-from seg_3d.evaluation.metrics import MetricList, get_metrics
-from seg_3d.evaluation.evaluator import Evaluator
-from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
-from seg_3d.seg_utils import EarlyStopping, seed_all
-from seg_3d.setup_config import setup_config
-
-from torch.utils.data import DataLoader
-from detectron2.utils.file_io import PathManager
-from detectron2.utils.collect_env import collect_env_info
+import numpy as np
+from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
+from detectron2.data.samplers import TrainingSampler
 from detectron2.modeling import build_model
 from detectron2.solver import build_lr_scheduler
-from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
+from detectron2.utils.file_io import PathManager
 from detectron2.utils.logger import setup_logger
-from detectron2.data.samplers import TrainingSampler
+from torch.utils.data import DataLoader
+
+import seg_3d
+from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
+from seg_3d.evaluation.evaluator import Evaluator
+from seg_3d.evaluation.metrics import MetricList, get_metrics
+from seg_3d.losses import get_loss_criterion, get_optimizer
+from seg_3d.seg_utils import EarlyStopping, seed_all, DefaultTensorboardFormatter
+from seg_3d.setup_config import setup_config
 
 
 def train(cfg, model):
@@ -67,6 +65,9 @@ def train(cfg, model):
                JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json")),
                TensorboardXWriter(cfg.OUTPUT_DIR)]
 
+    # init tensorboard formatter for images
+    tensorboard_img_formatter = DefaultTensorboardFormatter()
+
     # init early stopping
     early_stopping = EarlyStopping(monitor=cfg.EARLY_STOPPING.MONITOR,
                                    patience=cfg.EARLY_STOPPING.PATIENCE,
@@ -88,10 +89,9 @@ def train(cfg, model):
             storage.step()
             sample = batched_inputs["image"]
             labels = batched_inputs["gt_mask"].squeeze(1).long().to(cfg.MODEL.DEVICE)
-            
+
             # do a forward pass, input is of shape (N, C, D, H, W)
             preds = model(sample).squeeze(1)
-            preds = model.final_activation(preds)
 
             optimizer.zero_grad()
             training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
@@ -101,10 +101,19 @@ def train(cfg, model):
             storage.put_scalars(training_loss=training_loss, lr=optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
 
+            # process masks and images to be visualized in tensorboard
+            for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
+                                   [batched_inputs["orig_image"], sample, labels, preds]):
+                tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach())
+
+                # add each tag image tuple to tensorboard
+                for item in tags_imgs:
+                    storage.put_image(*item)
+
             # check if need to run eval step on validation data
             if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
                 results = evaluator.evaluate(model)
-                # storage.put_scalars(**results["metrics"])
+                # storage.put_scalars(**results["metrics"])  # FIXME
 
                 # check early stopping
                 if early_stopping.check_early_stopping(results["metrics"]):
@@ -128,16 +137,23 @@ def train(cfg, model):
             periodic_checkpointer.step(iteration)
 
     train_time = time() - train_start
-    logger.info("Completed training in %.0f s (%.2f h)" % (train_time, train_time/3600))
+    logger.info("Completed training in %.0f s (%.2f h)" % (train_time, train_time / 3600))
 
 
 def run(cfg):
     # logger.info("Environment info:\n" + collect_env_info())
 
+    # check if need to load config from disk
+    if cfg.CONFIG_FILE:
+        logger.warning("Merging config with {}. All params specified inside this file will overwrite existing values!"
+                       .format(cfg.CONFIG_FILE))
+        cfg.merge_from_file(cfg.CONFIG_FILE)
+
     path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
     with PathManager.open(path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(path))
+    cfg.freeze()  # freezes all param values
 
     # make training deterministic
     seed_all(cfg.SEED)

@@ -28,14 +28,14 @@ class EarlyStopping:
             # disable early stopping
             self.patience = 0
 
-    def get_es_result(self, current):
+    def get_es_result(self, current) -> bool:
         """Returns true if monitored metric has been improved"""
         if self.mode == 'max':
             return current > self.best
         elif self.mode == 'min':
             return current < self.best
 
-    def check_early_stopping(self, metric_results):
+    def check_early_stopping(self, metric_results) -> bool:
         if not self.patience:
             self.logger.warning("Early stopping disabled, skipping...")
             return False
@@ -224,7 +224,7 @@ class DefaultTensorboardFormatter(_TensorboardFormatter):
 
     @staticmethod
     def _normalize_img(img):
-        return np.nan_to_num((img - np.min(img)) / np.ptp(img))
+        return np.nan_to_num((img - img.min()) / np.ptp(img))
 
 
 def _find_masks(batch, min_size=10):

@@ -50,7 +50,6 @@ class Evaluator:
         model.train()
         averaged_results = (self.metric_list.get_results(average=True))
 
-
         self.logger.info("Inference done! Mean metric scores:")
         self.logger.info(json.dumps(averaged_results, indent=4))
 

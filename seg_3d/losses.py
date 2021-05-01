@@ -105,21 +105,26 @@ class BCEDiceLoss(nn.Module):
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
-        self.dice = DiceLoss()
+        self.dice = DiceLoss(normalization="sigmoid")
 
     def forward(self, input, target):
         return self.bce_weight * self.bce(input, target) + self.dice_weight * self.dice(input, target)
 
+
 @LOSS_REGISTRY.register()
 class CEDiceLoss(nn.Module):
-    """Linear combination of BCE and Dice losses"""
+    """Linear combination of CE and Dice losses"""
 
-    def __init__(self, ce_weight, dice_weight, device='cpu'):
+    def __init__(self, ce_weight, dice_weight, class_weight=None):
         super(CEDiceLoss, self).__init__()
         self.ce_weight = ce_weight
-        self.cross_entropy = nn.CrossEntropyLoss(weight=torch.Tensor([0.,1.,1.]).to(device))
         self.dice_weight = dice_weight
-        self.dice = DiceLoss(weight=torch.Tensor([0.,1.,1.]).to(device))
+
+        if class_weight is not None:
+            class_weight = torch.as_tensor(class_weight, dtype=torch.float)
+
+        self.cross_entropy = nn.CrossEntropyLoss(weight=class_weight)
+        self.dice = DiceLoss(weight=class_weight, normalization="softmax")
 
     def forward(self, input, target):
         ce = self.cross_entropy(input, target.argmax(dim=1))

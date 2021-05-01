@@ -71,15 +71,15 @@ class JointTransform2D:
         # divide by scan max
         if self.div_by_max:
             image = image / np.max(image)
-        
+
         orig_data = [image, masks]
 
         # elastic deform on numpy arrays
         if self.deform:
             deformed_data = self.deform(orig_data)
-        
+
         image, masks = deformed_data[0], deformed_data[1:]
-        
+
         # transforming to tensor
         image = F.to_tensor(image)
         mask = torch.Tensor(np.concatenate(masks, axis=0))
@@ -93,7 +93,6 @@ class JointTransform2D:
             if np.random.rand() < self.p_flip:
                 image, mask = F.hflip(image), F.hflip(mask)
 
-        
         return image, mask
 
 
@@ -130,8 +129,8 @@ class ImageToImage3D(Dataset):
     """
 
     def __init__(self, dataset_path: str, modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
-                joint_transform: Callable, patient_keys: List[str] = None, one_hot_mask: int = False,
-                num_patients: int = None) -> None:
+                 joint_transform: Callable, patient_keys: List[str] = None, one_hot_mask: int = False,
+                 num_patients: int = None) -> None:
         self.dataset_path = dataset_path
         self.modality = modality
         self.patient_keys = patient_keys
@@ -151,7 +150,7 @@ class ImageToImage3D(Dataset):
 
         # sample select patients if num_patients specified
         if num_patients is not None:
-            selected_patients = np.random.choice(self.patient_keys, size=self.num_patients, replace=False)
+            selected_patients = np.random.choice(sorted(self.patient_keys), size=self.num_patients, replace=False)
             self.excluded_patients = list(set(self.patient_keys) - set(selected_patients))
             self.patient_keys = selected_patients
 
@@ -169,6 +168,8 @@ class ImageToImage3D(Dataset):
 
         # read image
         image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps][:self.num_slices]).astype(np.float32)
+        # keep a copy of the unmodified image
+        orig_image = np.copy(image)
 
         # read mask image
         masks_array = self.get_mask(patient, image)
@@ -180,7 +181,7 @@ class ImageToImage3D(Dataset):
         if self.modality == "CT":
             image[image > 150] = 150
             image[image < -150] = -150
-  
+
         if self.joint_transform:
             image, mask = self.joint_transform(image, masks)
 
@@ -189,6 +190,7 @@ class ImageToImage3D(Dataset):
             mask = torch.zeros((self.one_hot_mask, *mask.shape[1:])).scatter_(0, mask.long(), 1)
 
         return {
+            "orig_image": orig_image,
             "image": image.unsqueeze(0).float(),
             "gt_mask": mask.float(),
             "patient": patient
@@ -217,7 +219,7 @@ class ImageToImage3D(Dataset):
         bg = np.zeros(tumor_mask.shape)
         bg = mask['Bladder'] + tumor_mask + 1
         bg[bg != 1] = 0
-        masks_array = [bg, mask['Bladder'], tumor_mask]
+        masks_array = [bg, mask['Bladder'], tumor_mask]  # FIXME: hardcoded
 
         return masks_array
 

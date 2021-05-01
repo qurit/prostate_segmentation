@@ -33,7 +33,7 @@ class Evaluator:
 
                 # apply final activation on preds
                 preds = model.final_activation(preds)
-                print(model.final_activation)
+
                 self.metric_list(preds, labels)
 
                 # print out results for patient

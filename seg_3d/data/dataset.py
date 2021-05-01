@@ -72,7 +72,7 @@ class JointTransform2D:
         if self.div_by_max:
             image = image / np.max(image)
         
-        orig_data = [image, masks]
+        orig_data = [image] + masks
 
         # elastic deform on numpy arrays
         if self.deform:
@@ -82,8 +82,8 @@ class JointTransform2D:
         
         # transforming to tensor
         image = F.to_tensor(image)
-        mask = torch.Tensor(np.concatenate(masks, axis=0))
-
+        mask = torch.Tensor(np.stack(masks, axis=0))
+        
         # random crop
         if self.crop:
             i, j, h, w = T.RandomCrop.get_params(image, self.crop)

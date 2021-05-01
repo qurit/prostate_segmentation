@@ -51,7 +51,11 @@ def dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def classwise_dice_score(pred, gt):
-    return torch.mean(compute_per_channel_dice(pred, gt, epsilon=1e-6))
+    return compute_per_channel_dice(pred, gt, epsilon=1e-6)
+
+@METRIC_REGISTRY.register()
+def bladder_dice_score(pred, gt):
+    return compute_per_channel_dice(pred, gt, epsilon=1e-6)[1]
 
 
 @METRIC_REGISTRY.register()
@@ -99,6 +103,28 @@ def classwise_f1(pred, gt):
     precision = (true_positives + epsilon) / (selected + epsilon)
     recall = (true_positives + epsilon) / (relevant + epsilon)
     return (2 * (precision * recall) / (precision + recall))
+
+
+@METRIC_REGISTRY.register()
+def classwise_f1_v2(pred, gt):
+    """
+    Args:
+        pred: torch.Tensor of shape (n_batch, n_classes, image.shape)
+        gt: torch.LongTensor of shape (n_batch, image.shape)
+    """
+    gt = gt.long().squeeze(1)
+    epsilon = 1e-20
+    n_classes = pred.shape[1]
+
+    pred = torch.argmax(pred, dim=1)
+    true_positives = torch.tensor([((pred == i) * (gt == i)).sum() for i in range(n_classes)]).float()
+    selected = torch.tensor([(pred == i).sum() for i in range(n_classes)]).float()
+    relevant = torch.tensor([(gt == i).sum() for i in range(n_classes)]).float()
+
+    precision = (true_positives + epsilon) / (selected + epsilon)
+    recall = (true_positives + epsilon) / (relevant + epsilon)
+    f1 = (2 * (precision * recall) / (precision + recall))
+    return f1[1]
 
 
 def get_metrics(config):

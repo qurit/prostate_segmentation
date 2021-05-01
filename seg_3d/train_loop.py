@@ -6,6 +6,7 @@ import json
 import pickle
 import logging
 import numpy as np
+import segmentation_models_pytorch as smp
 from time import time
 
 import seg_3d
@@ -142,7 +143,13 @@ def run(cfg):
     seed_all(cfg.SEED)
 
     # get model and load onto device
-    model = build_model(cfg)
+    # model = build_model(cfg)
+    model = smp.UnetPlusPlus(
+            encoder_name='densenet161',
+            in_channels=1,
+            classes=3
+        )
+
     # logger.info("Model:\n{}".format(model))
 
     # count number of parameters for model

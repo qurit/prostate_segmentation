@@ -56,11 +56,14 @@ class JointTransform2D:
     def __init__(self, crop=(100, 100), p_flip=0.5, deform=None, div_by_max=True):
 
         self.crop = crop
+        
         self.p_flip = p_flip
+        
         if deform:
             self.deform = lambda x: elasticdeform.deform_random_grid(x, sigma=deform)
         else:
             self.deform = lambda x: x
+            
         self.div_by_max = div_by_max
 
     def __call__(self, image, masks):
@@ -69,18 +72,16 @@ class JointTransform2D:
         if self.div_by_max:
             image = image / np.max(image)
 
-        orig_data = [image, masks]
+        sample_data = [image] + masks
 
-        # elastic deform on numpy arrays
-        if self.deform:
-            deformed_data = self.deform(orig_data)
+        sample_data = self.deform(sample_data)
 
-        image, masks = deformed_data[0], deformed_data[1:]
+        image, masks = sample_data[0], sample_data[1:]
 
         # transforming to tensor
         image = torch.Tensor(image)
-        mask = torch.Tensor(np.concatenate(masks, axis=0))
-
+        mask = torch.Tensor(np.stack(masks, axis=0))
+    
         # random crop
         if self.crop:
             i, j, h, w = T.RandomCrop.get_params(image, self.crop)
@@ -171,7 +172,7 @@ class ImageToImage3D(Dataset):
         # read mask image
         masks_array = self.get_mask(patient, image)
         image = centre_crop(image, (self.num_slices, *self.crop_size))
-        masks = np.asarray([centre_crop(mask, (self.num_slices, *self.crop_size)) for mask in masks_array])
+        masks = [centre_crop(mask, (self.num_slices, *self.crop_size)) for mask in masks_array]
 
         # clip values if modality is CT, no preprocessing of values necessary for PET
         if self.modality == "CT":

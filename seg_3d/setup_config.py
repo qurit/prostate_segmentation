@@ -13,12 +13,12 @@ def setup_config():
     cfg.SEED = 99
 
     # pipeline modes
-    cfg.RESUME = False  # Option to resume training, useful when training was interrupted
+    cfg.RESUME = True  # Option to resume training, useful when training was interrupted
     cfg.EVAL_ONLY = False
-    cfg.TEST.EVAL_PERIOD = 1  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
-    cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "classwise_f1"]  # metrics which get computed during eval
+    cfg.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
+    cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "bladder_dice_score", "classwise_f1"]  # metrics which get computed during eval
     cfg.EARLY_STOPPING.PATIENCE = 200  # set to 0 to disable
-    cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score"
+    cfg.EARLY_STOPPING.MONITOR = "bladder_dice_score"
     cfg.EARLY_STOPPING.MODE = "max"
 
     # paths
@@ -38,19 +38,19 @@ def setup_config():
     cfg.DATASET.one_hot_mask = False  # False or int for num of classes
 
     # transform options
-    cfg.ELASTIC_DEFORM_SD = None
+    cfg.ELASTIC_DEFORM_SD = 1.
     cfg.CROP_SIZE = None
     cfg.P_FLIP = None
     cfg.DIV_BY_MAX = True
 
     # model architecture
     cfg.MODEL.META_ARCHITECTURE = "SemanticSegNet"
-    cfg.MODEL.BACKBONE.NAME = "UNet3D"
+    cfg.MODEL.BACKBONE.NAME = "UNetPlus2D"
     # specify UNet params which are defined in Abstract3DUNet
     cfg.UNET.in_channels = 1
     cfg.UNET.out_channels = 3
     cfg.UNET.f_maps = 16
-    cfg.UNET.final_sigmoid = True  # final activation used during testing, if True then apply Sigmoid, else apply Softmax
+    cfg.UNET.final_sigmoid = False  # final activation used during testing, if True then apply Sigmoid, else apply Softmax
 
     # loss
     cfg.LOSS.FN = "CEDiceLoss"  # available loss functions are inside losses.py
@@ -61,16 +61,16 @@ def setup_config():
 
     # optim
     cfg.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim
-    cfg.SOLVER.PARAMS.lr = 0.0001
+    cfg.SOLVER.PARAMS.lr = 0.000001
     cfg.SOLVER.PARAMS.weight_decay = 0
     # cfg.SOLVER.PARAMS.momentum = 0.9
-    cfg.SOLVER.IMS_PER_BATCH = 1
-    cfg.SOLVER.MAX_ITER = 100000
-    cfg.SOLVER.CHECKPOINT_PERIOD = 500  # Save a checkpoint after every this number of iterations
+    cfg.SOLVER.IMS_PER_BATCH = 5
+    cfg.SOLVER.MAX_ITER = 1000000
+    cfg.SOLVER.CHECKPOINT_PERIOD = 200  # Save a checkpoint after every this number of iterations
 
     # lr scheduler params
     cfg.SOLVER.GAMMA = 0.1
-    cfg.SOLVER.STEPS = (3000,)  # The iteration number to decrease learning rate by GAMMA
+    cfg.SOLVER.STEPS = (30000, 60000, 90000,)  # The iteration number to decrease learning rate by GAMMA
     cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
 
     # make a default dir

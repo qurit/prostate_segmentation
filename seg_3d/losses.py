@@ -30,6 +30,8 @@ class _AbstractDiceLoss(nn.Module):
             self.normalization = nn.Softmax(dim=1)
         else:
             self.normalization = lambda x: x
+        
+        self.weight = weight
 
     def dice(self, input, target, weight):
         # actual Dice score computation; to be implemented by the subclass
@@ -40,11 +42,10 @@ class _AbstractDiceLoss(nn.Module):
         input = self.normalization(input)
 
         # compute per channel Dice coefficient
-        per_channel_dice = self.dice(input, target, weight=self.weight)
+        per_channel_dice = self.dice(input, target)
 
         # average Dice score across all channels/classes
-        return 1. - torch.mean(per_channel_dice)
-
+        return (1. - per_channel_dice)
 
 @LOSS_REGISTRY.register()
 class DiceLoss(_AbstractDiceLoss):
@@ -53,11 +54,11 @@ class DiceLoss(_AbstractDiceLoss):
     The input to the loss function is assumed to be a logit and will be normalized by the Sigmoid function.
     """
 
-    def __init__(self, weight=None, normalization='sigmoid'):
+    def __init__(self, weight=None, normalization='softmax'):
         super().__init__(weight, normalization)
 
-    def dice(self, input, target, weight):
-        return compute_per_channel_dice(input, target, weight=self.weight)
+    def dice(self, input, target, weight=None):
+        return compute_per_channel_dice(input, target, weight=None)
 
 
 @LOSS_REGISTRY.register()
@@ -129,7 +130,10 @@ class CEDiceLoss(nn.Module):
     def forward(self, input, target):
         ce = self.cross_entropy(input, target.argmax(dim=1))
         dice = self.dice(input, target)
-        return self.ce_weight * ce + self.dice_weight * dice
+
+        print('Cross Entropy: {} Dice: {}'.format(ce, dice))
+
+        return self.ce_weight * ce + self.dice_weight * dice[1:].sum()
 
 
 @LOSS_REGISTRY.register()
@@ -229,14 +233,7 @@ def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
          weight (torch.Tensor): Cx1 tensor of weight per channel/class
     """
 
-    input = nn.Sigmoid()(input)
-
-    # input and target shapes must match
-    if input.size() != target.size():
-        target = torch.nn.functional.one_hot(target)
-        if target.size()[-1] != input.size()[1]:
-            target = torch.cat((target, torch.zeros((*target.size()[:-1], 1))), dim=4)
-        target = target.view(input.size())
+    assert input.size() == target.size()
 
     input = flatten(input)
     target = flatten(target)
@@ -252,7 +249,6 @@ def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
 
     dice = 2 * (intersect / denominator.clamp(min=epsilon))
 
-    print('Dice scores - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(*list(dice.detach().cpu().numpy())))
     return dice
 
 

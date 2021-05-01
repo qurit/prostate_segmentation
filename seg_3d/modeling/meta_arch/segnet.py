@@ -13,7 +13,7 @@ class SemanticSegNet(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.backbone_name = cfg.MODEL.BACKBONE.NAME
-        self.backbone = BACKBONE_REGISTRY.get(self.backbone_name)(**cfg.UNET)
+        self.backbone = BACKBONE_REGISTRY.get(self.backbone_name)#(**cfg.UNET)
         self.device = cfg.MODEL.DEVICE
 
     @property

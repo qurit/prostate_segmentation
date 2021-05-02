@@ -177,16 +177,3 @@ class UNet2D(Abstract3DUNet):
                                      pool_kernel_size=(1, 2, 2),
                                      conv_padding=conv_padding,
                                      **kwargs)
-
-@BACKBONE_REGISTRY.register()
-class UNetPlus2D():
-    def __init__(self):
-        self.model = smp.UnetPlusPlus(
-            encoder_name='densenet161',
-            in_channels=1,
-            classes=3
-        )
-        print(self.model.parameters)
-    
-    def forward(x):
-        return self.model.forward(x)

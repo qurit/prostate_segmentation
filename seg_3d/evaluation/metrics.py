@@ -12,10 +12,11 @@ EPSILON = 1e-32
 
 
 class MetricList:
-    def __init__(self, metrics):
+    def __init__(self, metrics, class_labels):
         assert isinstance(metrics, dict), '\'metrics\' must be a dictionary of callables'
         self.metrics = metrics
         self.results = {key: [] for key in self.metrics.keys()}
+        self.class_labels = class_labels
 
     def __call__(self, y_out, y_batch):
         for key, value in self.metrics.items():
@@ -38,24 +39,56 @@ class MetricList:
                     value = np.asarray([x.detach().cpu().numpy() for x in value]).mean(axis=0).tolist()
                 else:
                     value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
-                averaged_results[key] = value
+                
+                if len(value) > 1:
+                    for i in range(len(values)):
+                        averaged_results[key+'-{}'.format(class_labels[i])] = values[i]
+                else:
+                    averaged_results[key] = value
 
             return averaged_results
 
 
 @METRIC_REGISTRY.register()
-def dice_score(pred, gt):
-    pred = pred.round()  # threshold pred
+def dice_score(pred, gt, round=True):
+    if round:
+        pred = pred.round()  # threshold pred
+    
     return (pred[gt == 1]).sum() * 2.0 / (pred.sum() + gt.sum())
 
 
 @METRIC_REGISTRY.register()
 def classwise_dice_score(pred, gt):
-    return compute_per_channel_dice(pred, gt, epsilon=1e-6)
+    return compute_per_channel_dice(pred, gt, epsilon=1e-6).detach().cpu().numpy()
 
 @METRIC_REGISTRY.register()
 def bladder_dice_score(pred, gt):
     return compute_per_channel_dice(pred, gt, epsilon=1e-6)[1]
+
+@METRIC_REGISTRY.register()
+def argmax_dice_score(pred, gt):
+    pred = pred.detach().cpu().numpy().argmax(axis=1)
+    gt = gt.detach().cpu().numpy()
+
+    pred_bg, pred_blad, pred_tum = pred.copy(), pred.copy(), pred.copy()
+    pred_bg[pred_bg != 0] = -1
+    pred_bg[pred_bg == 0] = 1
+    pred_bg[pred_bg == -1] = 0
+
+    pred_blad[pred_blad != 1] = 0
+
+    pred_tum[pred_tum != 2] = 0
+    pred_tum[pred_tum == 2] = 1
+
+    gt_bg = gt[:, 0, :, :, :]
+    gt_blad = gt[:, 1, :, :, :]
+    gt_tum = gt[:, 2, :, :, :]
+
+    dice_bg = dice_score(pred_bg, gt_bg, round=False)
+    dice_blad = dice_score(pred_blad, gt_blad, round=False)
+    dice_tum = dice_score(pred_tum, gt_tum, round=False)
+
+    return [dice_bg, dice_blad, dice_tum]
 
 
 @METRIC_REGISTRY.register()

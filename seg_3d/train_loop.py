@@ -50,7 +50,7 @@ def train(cfg, model):
     logger.info("Loss:\n{}".format(loss))
 
     # init eval metrics and evaluator
-    metric_list = MetricList(metrics=get_metrics(cfg))
+    metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.class_labels)
     evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, metric_list=metric_list)
 
     # init checkpointers
@@ -104,7 +104,7 @@ def train(cfg, model):
             # process masks and images to be visualized in tensorboard
             for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
                                    [batched_inputs["orig_image"], sample, labels, preds]):
-                tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach())
+                tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
 
                 # add each tag image tuple to tensorboard
                 for item in tags_imgs:
@@ -113,7 +113,7 @@ def train(cfg, model):
             # check if need to run eval step on validation data
             if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
                 results = evaluator.evaluate(model)
-                # storage.put_scalars(**results["metrics"])  # FIXME
+                storage.put_scalars(**results["metrics"])
 
                 # check early stopping
                 if early_stopping.check_early_stopping(results["metrics"]):
@@ -159,12 +159,12 @@ def run(cfg):
     seed_all(cfg.SEED)
 
     # get model and load onto device
-    # model = build_model(cfg)
-    model = smp.UnetPlusPlus(
-            encoder_name='densenet161',
-            in_channels=1,
-            classes=3
-        )
+    model = build_model(cfg)
+    # model = smp.UnetPlusPlus(
+    #         encoder_name='densenet161',
+    #         in_channels=1,
+    #         classes=3
+    #     )
 
     # logger.info("Model:\n{}".format(model))
 

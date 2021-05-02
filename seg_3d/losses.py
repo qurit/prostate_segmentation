@@ -6,6 +6,7 @@ from torch.autograd import Variable
 from detectron2.utils.registry import Registry
 
 from seg_3d.seg_utils import expand_as_one_hot
+from seg_3d.evaluation import metrics
 
 LOSS_REGISTRY = Registry('LOSS')
 
@@ -116,25 +117,28 @@ class BCEDiceLoss(nn.Module):
 class CEDiceLoss(nn.Module):
     """Linear combination of CE and Dice losses"""
 
-    def __init__(self, ce_weight, dice_weight, class_weight=None):
+    def __init__(self, ce_weight, dice_weight, class_weight=None, device=None):
         super(CEDiceLoss, self).__init__()
         self.ce_weight = ce_weight
         self.dice_weight = dice_weight
 
         if class_weight is not None:
             class_weight = torch.as_tensor(class_weight, dtype=torch.float)
-
-        self.cross_entropy = nn.CrossEntropyLoss(weight=class_weight)
+        if device:
+            class_weight = class_weight.to(device)
+        self.cross_entropy = nn.BCEWithLogitsLoss()
         self.dice = DiceLoss(weight=class_weight, normalization="softmax")
 
     def forward(self, input, target):
-        ce = self.cross_entropy(input, target.argmax(dim=1))
+        ce = self.cross_entropy(input, target.float())
         dice = self.dice(input, target)
+        dice_verbose = 1 - dice.detach().cpu().numpy()
 
-        print('Cross Entropy: {} Dice: {}'.format(ce, dice))
+        overlap_loss = metrics.dice_score(input[:, 1, :, :, :], input[:, 2, :, :, :], round=False)
 
-        return self.ce_weight * ce + self.dice_weight * dice[1:].sum()
+        print('BCE: {:.8f} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(ce, *dice_verbose))
 
+        return self.ce_weight * ce + self.dice_weight * dice.sum()
 
 @LOSS_REGISTRY.register()
 class WeightedCrossEntropyLoss(nn.Module):

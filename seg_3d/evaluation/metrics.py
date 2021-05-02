@@ -40,9 +40,9 @@ class MetricList:
                 else:
                     value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
                 
-                if len(value) > 1:
-                    for i in range(len(values)):
-                        averaged_results[key+'-{}'.format(class_labels[i])] = values[i]
+                if type(value) is list:
+                    for i in range(len(value)):
+                        averaged_results[key+'/{}'.format(self.class_labels[i])] = value[i]
                 else:
                     averaged_results[key] = value
 
@@ -88,7 +88,22 @@ def argmax_dice_score(pred, gt):
     dice_blad = dice_score(pred_blad, gt_blad, round=False)
     dice_tum = dice_score(pred_tum, gt_tum, round=False)
 
+    overlap = pred_blad * gt_tum
+
     return [dice_bg, dice_blad, dice_tum]
+
+@METRIC_REGISTRY.register()
+def overlap(pred, gt):
+    pred = pred.detach().cpu().numpy().argmax(axis=1)
+    gt = gt.detach().cpu().numpy()
+
+    pred[pred != 1] = 0
+
+    gt = gt[:, 2, :, :, :]
+
+    overlap = (pred * gt).sum() / gt.shape[0]
+
+    return overlap
 
 
 @METRIC_REGISTRY.register()

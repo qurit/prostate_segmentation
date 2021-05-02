@@ -117,28 +117,37 @@ class BCEDiceLoss(nn.Module):
 class CEDiceLoss(nn.Module):
     """Linear combination of CE and Dice losses"""
 
-    def __init__(self, ce_weight, dice_weight, class_weight=None, device=None):
+    def __init__(self, ce_weight, dice_weight, overlap_weight, class_weight=None, device=None):
         super(CEDiceLoss, self).__init__()
         self.ce_weight = ce_weight
         self.dice_weight = dice_weight
+        self.overlap_weight = overlap_weight
 
         if class_weight is not None:
             class_weight = torch.as_tensor(class_weight, dtype=torch.float)
         if device:
             class_weight = class_weight.to(device)
+
         self.cross_entropy = nn.BCEWithLogitsLoss()
         self.dice = DiceLoss(weight=class_weight, normalization="softmax")
+
+        self.smax = nn.Softmax(dim=1)
+
+        self.overlap = lambda pred, gt: (self.smax(pred)[:, 1, :, :, :] * gt).sum() / gt.sum()
 
     def forward(self, input, target):
         ce = self.cross_entropy(input, target.float())
         dice = self.dice(input, target)
         dice_verbose = 1 - dice.detach().cpu().numpy()
 
-        overlap_loss = metrics.dice_score(input[:, 1, :, :, :], input[:, 2, :, :, :], round=False)
+        if target[:, 2, :, :, :].sum() != 0:
+            overlap_loss = self.overlap(input, target[:, 2, :, :, :])
+        else:
+            overlap_loss = 0.
 
-        print('BCE: {:.8f} Overlap: {:.4f} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(ce, overlap_loss, *dice_verbose))
+        print('BCE: {:.8f} Overlap: {:.8} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(ce, overlap_loss, *dice_verbose))
 
-        return self.ce_weight * ce + self.dice_weight * dice.sum() + overlap_loss
+        return self.ce_weight * ce + self.dice_weight * dice.sum() + self.overlap_weight * overlap_loss
 
 @LOSS_REGISTRY.register()
 class WeightedCrossEntropyLoss(nn.Module):

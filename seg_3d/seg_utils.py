@@ -26,7 +26,7 @@ class EarlyStopping:
             self.logger.warning("Early stopping enabled but cannot find metric: \'%s\'" % self.monitor)
             self.logger.warning("Options for monitored metrics are: [%s]" % ", ".join(map(str, metric_keys)))
             # disable early stopping
-            self.patience = 0
+            # self.patience = 0
 
     def get_es_result(self, current) -> bool:
         """Returns true if monitored metric has been improved"""

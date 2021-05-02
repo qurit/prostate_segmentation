@@ -24,7 +24,7 @@ def setup_config():
     # paths
     cfg.TRAIN_DATASET_PATH = "data/image_dataset"
     cfg.TEST_DATASET_PATH = "data/test_dataset"
-    cfg.OUTPUT_DIR = "seg_3d/output/1bce-augs-5inters"
+    cfg.OUTPUT_DIR = "seg_3d/output/bce-overlap-3blad-noaugs"
     cfg.MODEL.WEIGHTS = ""  # file path for .pth model weight file, needs to be set when EVAL_ONLY
     cfg.CONFIG_FILE = ""  # option to load params from a config yaml file, e.g. base config for 3D or 2D segmentation
 
@@ -40,10 +40,10 @@ def setup_config():
     cfg.class_labels = ['Background', 'Bladder', 'Tumor']
 
     # transform options
-    cfg.ELASTIC_DEFORM_SD = None
-    cfg.CROP_SIZE = (128, 128)
-    cfg.P_FLIP = 0.5
-    cfg.DIV_BY_MAX = False
+    cfg.TRANSFORMS.deform = None
+    cfg.TRANSFORMS.crop = None
+    cfg.TRANSFORMS.p_flip = None
+    cfg.TRANSFORMS.div_by_max = False
 
     # model architecture
     cfg.MODEL.META_ARCHITECTURE = "SemanticSegNet"
@@ -57,10 +57,10 @@ def setup_config():
     # loss
     cfg.LOSS.FN = "CEDiceLoss"  # available loss functions are inside losses.py
     # specify loss params (if any)
-    cfg.LOSS.PARAMS.ce_weight = 1.0
+    cfg.LOSS.PARAMS.ce_weight = 0.
     cfg.LOSS.PARAMS.dice_weight = 1.0
-    cfg.LOSS.PARAMS.overlap_weight = 5.
-    cfg.LOSS.PARAMS.class_weight = [1, 1, 1]
+    cfg.LOSS.PARAMS.overlap_weight = 10.
+    cfg.LOSS.PARAMS.class_weight = [1, 3, 1]
     cfg.LOSS.PARAMS.device = "cuda:0"
 
     # optim
@@ -74,7 +74,7 @@ def setup_config():
 
     # lr scheduler params
     cfg.SOLVER.GAMMA = 0.1
-    cfg.SOLVER.STEPS = (120, 250, 400,)  # The iteration number to decrease learning rate by GAMMA
+    cfg.SOLVER.STEPS = (240, 480, 700,)  # The iteration number to decrease learning rate by GAMMA
     cfg.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
 
     # make a default dir

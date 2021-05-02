@@ -30,10 +30,10 @@ def train(cfg, model):
     model.train()
 
     # get training and validation datasets
-    transform_augmentations = JointTransform2D(crop=cfg.CROP_SIZE, p_flip=cfg.P_FLIP, deform=cfg.ELASTIC_DEFORM_SD)
+    transform_augmentations = JointTransform2D(test=False, **cfg.TRANSFORMS)
     train_dataset = ImageToImage3D(joint_transform=transform_augmentations, dataset_path=cfg.TRAIN_DATASET_PATH,
                                    num_patients=cfg.TRAIN_NUM_PATIENTS, **cfg.DATASET)
-    val_transforms = JointTransform2D(crop=None, p_flip=None, deform=None, div_by_max=True)
+    val_transforms = JointTransform2D(test=True, **cfg.TRANSFORMS)
     val_dataset = ImageToImage3D(joint_transform=val_transforms, dataset_path=cfg.TRAIN_DATASET_PATH, num_patients=cfg.VAL_NUM_PATIENTS,
                                  patient_keys=train_dataset.excluded_patients, **cfg.DATASET)
     logger.info("Patient keys excluded from train-val split: {}".format(val_dataset.excluded_patients))

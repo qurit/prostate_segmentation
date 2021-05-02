@@ -113,7 +113,7 @@ class JointTransform2D:
         p_flip: float, the probability of performing a random horizontal flip.
     """
 
-    def __init__(self, crop=(100, 100), p_flip=0.5, deform=None, div_by_max=True):
+    def __init__(self, test=False, crop=(100, 100), p_flip=0.5, deform=None, div_by_max=True):
 
         self.crop = crop
         
@@ -126,6 +126,8 @@ class JointTransform2D:
             self.deform = lambda x: x
             
         self.div_by_max = div_by_max
+
+        self.test = test
 
     def __call__(self, image, masks):
 
@@ -143,8 +145,11 @@ class JointTransform2D:
     
         # random crop
         if self.crop:
-            i, j, h, w = T.RandomCrop.get_params(image, self.crop)
-            image, mask = F.crop(image, i, j, h, w), F.crop(mask, i, j, h, w)
+            if not self.test:
+                i, j, h, w = T.RandomCrop.get_params(image, self.crop)
+                image, mask = F.crop(image, i, j, h, w), F.crop(mask, i, j, h, w)
+            else:
+                image, mask = T.CenterCrop(self.crop[0])(image), T.CenterCrop(self.crop[0])(mask)
 
         if self.p_flip:
             if np.random.rand() < self.p_flip:

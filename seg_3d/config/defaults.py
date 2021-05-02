@@ -32,4 +32,7 @@ _C.UNET = new_CN()
 # dataset
 _C.DATASET = new_CN()
 
+# transforms
+_C.TRANSFORMS = new_CN()
+
 _C.VERSION = 2

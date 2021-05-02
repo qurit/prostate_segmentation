@@ -136,9 +136,9 @@ class CEDiceLoss(nn.Module):
 
         overlap_loss = metrics.dice_score(input[:, 1, :, :, :], input[:, 2, :, :, :], round=False)
 
-        print('BCE: {:.8f} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(ce, *dice_verbose))
+        print('BCE: {:.8f} Overlap: {:.4f} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(ce, overlap_loss, *dice_verbose))
 
-        return self.ce_weight * ce + self.dice_weight * dice.sum()
+        return self.ce_weight * ce + self.dice_weight * dice.sum() + overlap_loss
 
 @LOSS_REGISTRY.register()
 class WeightedCrossEntropyLoss(nn.Module):

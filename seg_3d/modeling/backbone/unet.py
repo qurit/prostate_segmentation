@@ -6,8 +6,6 @@ from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
 from seg_3d.modeling.backbone.buildingblocks import DoubleConv, ExtResNetBlock, create_encoders, create_decoders
 from seg_3d.seg_utils import number_of_features_per_level
 
-import segmentation_models_pytorch as smp
-
 
 class Abstract3DUNet(Backbone):
     """

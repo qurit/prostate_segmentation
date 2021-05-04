@@ -7,7 +7,6 @@ from typing import Callable
 from typing import List, Tuple
 
 import elasticdeform
-from scipy.ndimage import rotate, map_coordinates, gaussian_filter
 import numpy as np
 import pydicom as dicom
 import torch
@@ -40,65 +39,6 @@ def correct_dims(*images):
     else:
         return corr_images
 
-# it's relatively slow, i.e. ~1s per patch of size 64x200x200, so use multiple workers in the DataLoader
-# remember to use spline_order=0 when transforming the labels
-class ElasticDeformation:
-    """
-    Apply elasitc deformations of 3D patches on a per-voxel mesh. Assumes ZYX axis order (or CZYX if the data is 4D).
-    Based on: https://github.com/fcalvet/image_tools/blob/master/image_augmentation.py#L62
-    """
-
-    def __init__(self, random_state, spline_order, alpha=50, sigma=1, execution_probability=1., apply_3d=True,
-                 **kwargs):
-        """
-        :param spline_order: the order of spline interpolation (use 0 for labeled images)
-        :param alpha: scaling factor for deformations
-        :param sigma: smoothing factor for Gaussian filter
-        :param execution_probability: probability of executing this transform
-        :param apply_3d: if True apply deformations in each axis
-        """
-        self.random_state = random_state
-        self.spline_order = spline_order
-        self.alpha = alpha
-        self.sigma = sigma
-        self.execution_probability = execution_probability
-        self.apply_3d = apply_3d
-
-    def __call__(self, m):
-        if self.random_state.uniform() < self.execution_probability:
-            assert m.ndim in [3, 4]
-
-            if m.ndim == 3:
-                volume_shape = m.shape
-            else:
-                volume_shape = m[0].shape
-
-            if self.apply_3d:
-                dz = gaussian_filter(self.random_state.randn(*volume_shape), self.sigma, mode="reflect") * self.alpha
-            else:
-                dz = np.zeros_like(m)
-
-            dy, dx = [
-                gaussian_filter(
-                    self.random_state.randn(*volume_shape),
-                    self.sigma, mode="reflect"
-                ) * self.alpha for _ in range(2)
-            ]
-
-            z_dim, y_dim, x_dim = volume_shape
-            z, y, x = np.meshgrid(np.arange(z_dim), np.arange(y_dim), np.arange(x_dim), indexing='ij')
-            indices = z + dz, y + dy, x + dx
-
-            if m.ndim == 3:
-                return map_coordinates(m, indices, order=self.spline_order, mode='reflect')
-            else:
-                channels = [map_coordinates(c, indices, order=self.spline_order, mode='reflect') for c in m]
-                return np.stack(channels, axis=0)
-
-        return m
-
-
-
 
 class JointTransform2D:
     """
@@ -113,21 +53,18 @@ class JointTransform2D:
         p_flip: float, the probability of performing a random horizontal flip.
     """
 
-    def __init__(self, test=False, crop=(100, 100), p_flip=0.5, deform=None, div_by_max=True):
-
+    def __init__(self, test=False, crop=(100, 100), p_flip=0.5, deform_sigma=None, div_by_max=True):
         self.crop = crop
-        
         self.p_flip = p_flip
-        
-        if deform:
-            # self.deform = lambda x: elasticdeform.deform_random_grid(x, sigma=deform)
-            self.deform = ElasticDeformation(np.random.RandomState(seed=15), spline_order=0)
-        else:
-            self.deform = lambda x: x
-            
         self.div_by_max = div_by_max
-
         self.test = test
+
+        if deform_sigma:
+            self.deform = lambda x, y: \
+                elasticdeform.deform_random_grid([x, *y], sigma=deform_sigma,
+                                                 order=[3, *[0] * len(y)])  # order must be 0 for mask arrays
+        else:
+            self.deform = lambda x, y: [x, *y]
 
     def __call__(self, image, masks):
 
@@ -135,14 +72,19 @@ class JointTransform2D:
         if self.div_by_max:
             image = image / np.max(image)
 
-        sample_data = self.deform(np.stack([image] + masks, axis=0))
+        sample_data = self.deform(image, masks)
+        image, masks = sample_data[0], sample_data[1:]
 
-        image, masks = sample_data[0], sample_data[1:].astype(int)
+        # fix channel for background
+        bkd = np.ones_like(image)
+        for m in masks[1:]:
+            bkd[bkd == m] = 0
+        masks[0] = bkd
 
         # transforming to tensor
         image = torch.Tensor(image)
-        mask = torch.Tensor(np.stack(masks, axis=0))
-    
+        mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
+
         # random crop
         if self.crop:
             if not self.test:
@@ -151,9 +93,8 @@ class JointTransform2D:
             else:
                 image, mask = T.CenterCrop(self.crop[0])(image), T.CenterCrop(self.crop[0])(mask)
 
-        if self.p_flip:
-            if np.random.rand() < self.p_flip:
-                image, mask = F.hflip(image), F.hflip(mask)
+        if self.p_flip and np.random.rand() < self.p_flip:
+            image, mask = F.hflip(image), F.hflip(mask)
 
         return image, mask
 

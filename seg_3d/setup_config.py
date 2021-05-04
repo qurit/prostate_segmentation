@@ -40,7 +40,7 @@ def setup_config():
     cfg.class_labels = ['Background', 'Bladder', 'Tumor']
 
     # transform options
-    cfg.TRANSFORMS.deform = None
+    cfg.TRANSFORMS.deform_sigma = 5
     cfg.TRANSFORMS.crop = None
     cfg.TRANSFORMS.p_flip = None
     cfg.TRANSFORMS.div_by_max = False
@@ -61,7 +61,7 @@ def setup_config():
     cfg.LOSS.PARAMS.dice_weight = 1.0
     cfg.LOSS.PARAMS.overlap_weight = 10.
     cfg.LOSS.PARAMS.class_weight = [1, 3, 1]
-    cfg.LOSS.PARAMS.device = "cuda:0"
+    cfg.LOSS.PARAMS.device = cfg.MODEL.DEVICE
 
     # optim
     cfg.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim

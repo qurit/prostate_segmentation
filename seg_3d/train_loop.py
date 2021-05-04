@@ -2,9 +2,6 @@ import json
 import logging
 import os
 import pickle
-import random
-import numpy as np
-import segmentation_models_pytorch as smp
 from time import time
 
 import numpy as np

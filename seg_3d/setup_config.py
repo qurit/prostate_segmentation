@@ -15,6 +15,7 @@ def setup_config() -> CN:
 
     # add custom config which override parameter values if they already exist
     add_custom_config(cfg)
+    # add_inference_config(cfg)
 
     return cfg
 
@@ -47,3 +48,9 @@ def add_custom_config(cfg: CN) -> None:
     cfg.SOLVER.MAX_ITER = 1000000
     cfg.SOLVER.CHECKPOINT_PERIOD = 200
     cfg.SOLVER.STEPS = (240, 480, 700,)
+
+
+def add_inference_config(cfg: CN) -> None:
+    cfg.EVAL_ONLY = True
+    cfg.MODEL.WEIGHTS = "seg_3d/output/test-1/model_best.pth"
+    cfg.TEST.INFERENCE_FILE_NAME = "test_inference.pk"

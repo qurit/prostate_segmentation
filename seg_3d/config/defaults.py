@@ -25,6 +25,11 @@ _C.DATASET.TEST_DATASET_PATH = "data/test_dataset"
 
 _C.DATASET.TRAIN_NUM_PATIENTS = None
 _C.DATASET.VAL_NUM_PATIENTS = None
+_C.DATASET.TEST_NUM_PATIENTS = None
+
+_C.DATASET.TRAIN_PATIENT_KEYS = None
+_C.DATASET.VAL_PATIENT_KEYS = None
+_C.DATASET.TEST_PATIENT_KEYS = None
 
 _C.DATASET.PARAMS.modality = "PT"
 _C.DATASET.PARAMS.rois = ["Bladder"]
@@ -88,6 +93,7 @@ _C.TEST.EVAL_PERIOD = 0  # The period (in terms of steps) to evaluate the model 
 # metrics which get computed during eval, available metrics found inside evaluation/metrics.py
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []
+_C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation
 
 # -----------------------------------------------------------------------------
 # PIPELINE MODES

@@ -109,7 +109,7 @@ class ImageToImage3D(Dataset):
     """
 
     def __init__(self, dataset_path: str, modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
-                 joint_transform: Callable, patient_keys: List[str] = None, num_patients: int = None) -> None:
+                 joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None) -> None:
         self.dataset_path = dataset_path
         self.modality = modality
         self.patient_keys = patient_keys
@@ -140,6 +140,8 @@ class ImageToImage3D(Dataset):
                                               key=lambda x: int(os.path.basename(x).split('.')[0]))[:self.num_slices]
                               for patient in self.patient_keys}
 
+        if joint_transform is None:
+            joint_transform = JointTransform2D(crop=None, p_flip=None, deform_sigma=None, div_by_max=False)
         self.joint_transform = joint_transform
 
     def __len__(self) -> int:
@@ -164,8 +166,7 @@ class ImageToImage3D(Dataset):
             image[image > 150] = 150
             image[image < -150] = -150
 
-        if self.joint_transform:
-            image, mask = self.joint_transform(image, masks)
+        image, mask = self.joint_transform(image, masks)
 
         return {
             "orig_image": orig_image,
@@ -205,7 +206,7 @@ class ImageToImage3D(Dataset):
     @staticmethod
     def process_bladder_tumor_mask(mask) -> dict:
         tumor_keys = [x for x in mask.keys() if "Tumor" in x]
-        tumor_mask = np.zeros_like(mask[tumor_keys[0]])
+        tumor_mask = np.zeros_like(list(mask.values())[0])
 
         # merge Tumor rois into a single channel
         for tum in tumor_keys:
@@ -216,6 +217,8 @@ class ImageToImage3D(Dataset):
         mask["Bladder"][tumor_mask == 1] = 0  # ensure there is no overlap in gt bladder mask
 
         # return new mask object just with Bladder and Tumor roi
+        # if dataset has no tumor mask but "Tumor" is specified in self.rois then an empty mask
+        # is returned for Tumor channel
         return {
             "Bladder": mask["Bladder"],
             "Tumor": tumor_mask

@@ -31,29 +31,29 @@ class MetricList:
     def get_results(self, average=False):
         if not average:
             return self.results
-        else:
-            averaged_results = {}
 
-            for key, value in self.results.items():
-                if type(value[0]) == torch.Tensor and value[0].is_cuda:
-                    value = np.asarray([x.detach().cpu().numpy() for x in value]).mean(axis=0).tolist()
-                else:
-                    value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
-                
-                if type(value) is list:
-                    for i in range(len(value)):
-                        averaged_results[key+'/{}'.format(self.class_labels[i])] = value[i]
-                else:
-                    averaged_results[key] = value
+        averaged_results = {}
 
-            return averaged_results
+        for key, value in self.results.items():
+            if type(value[0]) == torch.Tensor and value[0].is_cuda:
+                value = np.asarray([x.detach().cpu().numpy() for x in value]).mean(axis=0).tolist()
+            else:
+                value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
+
+            if type(value) is list:
+                for i in range(len(value)):
+                    averaged_results[key + '/{}'.format(self.class_labels[i])] = value[i]
+            else:
+                averaged_results[key] = value
+
+        return averaged_results
 
 
 @METRIC_REGISTRY.register()
 def dice_score(pred, gt, round=True):
     if round:
         pred = pred.round()  # threshold pred
-    
+
     return (pred[gt == 1]).sum() * 2.0 / (pred.sum() + gt.sum())
 
 
@@ -61,9 +61,11 @@ def dice_score(pred, gt, round=True):
 def classwise_dice_score(pred, gt):
     return compute_per_channel_dice(pred, gt, epsilon=1e-6).detach().cpu().numpy()
 
+
 @METRIC_REGISTRY.register()
 def bladder_dice_score(pred, gt):
     return compute_per_channel_dice(pred, gt, epsilon=1e-6)[1]
+
 
 @METRIC_REGISTRY.register()
 def argmax_dice_score(pred, gt):
@@ -91,6 +93,7 @@ def argmax_dice_score(pred, gt):
     overlap = pred_blad * gt_tum
 
     return [dice_bg, dice_blad, dice_tum]
+
 
 @METRIC_REGISTRY.register()
 def overlap(pred, gt):
@@ -122,7 +125,7 @@ def classwise_iou(pred, gt):
     dims = (0, *range(2, len(pred.shape)))
     gt = gt.squeeze(1).long()
     gt = torch.zeros_like(pred).scatter_(1, gt[:, None, :], 1)
-    intersection = pred*gt
+    intersection = pred * gt
     union = pred + gt - intersection
     return (intersection.sum(dim=dims).float() + EPSILON) / (union.sum(dim=dims) + EPSILON)
 

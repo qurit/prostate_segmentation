@@ -1,0 +1,23 @@
+_BASE_: Base-3D-UNet.yaml
+MODEL:
+  UNET:
+    out_channels: 3  # channels are background, bladder, tumor
+DATASET:
+  TRAIN_DATASET_PATH: data/image_dataset
+  TEST_DATASET_PATH: data/test_dataset
+  CLASS_LABELS:
+    - Background
+    - Bladder
+    - Tumor
+  PARAMS:
+    crop_size:
+      - 140
+      - 140
+    num_slices: 128
+    modality: PT
+    # merges tumor rois Tumor, Tumor2, Tumor3
+    rois:
+    - Bladder
+    - Tumor
+    - Tumor2
+    - Tumor3

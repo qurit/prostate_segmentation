@@ -23,16 +23,22 @@ from seg_3d.seg_utils import EarlyStopping, seed_all, DefaultTensorboardFormatte
 from seg_3d.setup_config import setup_config
 
 
-def train(cfg, model):
+def train(model):
     model.train()
 
     # get training and validation datasets
     transform_augmentations = JointTransform2D(test=False, **cfg.TRANSFORMS)
-    train_dataset = ImageToImage3D(joint_transform=transform_augmentations, dataset_path=cfg.TRAIN_DATASET_PATH,
-                                   num_patients=cfg.TRAIN_NUM_PATIENTS, **cfg.DATASET)
+    train_dataset = ImageToImage3D(joint_transform=transform_augmentations,
+                                   dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
+                                   num_patients=cfg.DATASET.TRAIN_NUM_PATIENTS,
+                                   **cfg.DATASET.PARAMS)
+
     val_transforms = JointTransform2D(test=True, **cfg.TRANSFORMS)
-    val_dataset = ImageToImage3D(joint_transform=val_transforms, dataset_path=cfg.TRAIN_DATASET_PATH, num_patients=cfg.VAL_NUM_PATIENTS,
-                                 patient_keys=train_dataset.excluded_patients, **cfg.DATASET)
+    val_dataset = ImageToImage3D(joint_transform=val_transforms,
+                                 dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
+                                 num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
+                                 patient_keys=train_dataset.excluded_patients,
+                                 **cfg.DATASET.PARAMS)
     logger.info("Patient keys excluded from train-val split: {}".format(val_dataset.excluded_patients))
 
     # setup logger for detectron2 modules
@@ -47,7 +53,7 @@ def train(cfg, model):
     logger.info("Loss:\n{}".format(loss))
 
     # init eval metrics and evaluator
-    metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.class_labels)
+    metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
     evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, metric_list=metric_list)
 
     # init checkpointers
@@ -69,7 +75,7 @@ def train(cfg, model):
     early_stopping = EarlyStopping(monitor=cfg.EARLY_STOPPING.MONITOR,
                                    patience=cfg.EARLY_STOPPING.PATIENCE,
                                    mode=cfg.EARLY_STOPPING.MODE)
-    early_stopping.check_is_valid(metric_list)
+    early_stopping.check_is_valid(metric_list, cfg.DATASET.CLASS_LABELS)
 
     # measuring the time elapsed
     train_start = time()
@@ -124,7 +130,7 @@ def train(cfg, model):
                         json.dump(results["metrics"], f)
 
                 elif early_stopping.triggered:
-                    # do something before finishing execution?
+                    # add logic here to do something before finishing execution
                     break
 
             # print out info about iteration
@@ -137,33 +143,17 @@ def train(cfg, model):
     logger.info("Completed training in %.0f s (%.2f h)" % (train_time, train_time / 3600))
 
 
-def run(cfg):
-    # logger.info("Environment info:\n" + collect_env_info())
-
-    # check if need to load config from disk
-    if cfg.CONFIG_FILE:
-        logger.warning("Merging config with {}. All params specified inside this file will overwrite existing values!"
-                       .format(cfg.CONFIG_FILE))
-        cfg.merge_from_file(cfg.CONFIG_FILE)
-
+def run():
     path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
     with PathManager.open(path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(path))
-    cfg.freeze()  # freezes all param values
 
     # make training deterministic
     seed_all(cfg.SEED)
 
     # get model and load onto device
     model = build_model(cfg)
-    # model = smp.UnetPlusPlus(
-    #         encoder_name='densenet161',
-    #         in_channels=1,
-    #         classes=3
-    #     )
-
-    # logger.info("Model:\n{}".format(model))
 
     # count number of parameters for model
     net_params = model.parameters()
@@ -172,14 +162,16 @@ def run(cfg):
 
     if cfg.EVAL_ONLY:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
+        # FIXME
         return NotImplementedError
 
-    return train(cfg, model)
+    return train(model)
 
 
 if __name__ == '__main__':
     # setup config
     cfg = setup_config()
+    cfg.freeze()
 
     # setup logging
     setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
@@ -189,4 +181,4 @@ if __name__ == '__main__':
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
     # run train loop
-    run(cfg)
+    run()

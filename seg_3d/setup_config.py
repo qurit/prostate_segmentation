@@ -13,6 +13,9 @@ def setup_config() -> CN:
     cfg.CONFIG_FILE = "seg_3d/config/bladder-detection.yaml"
     cfg.merge_from_file(cfg.CONFIG_FILE)
 
+    # option to resume training
+    # resume_training(cfg)
+
     # add custom config which override parameter values if they already exist
     add_custom_config(cfg)
     # add_inference_config(cfg)
@@ -54,3 +57,7 @@ def add_inference_config(cfg: CN) -> None:
     cfg.EVAL_ONLY = True
     cfg.MODEL.WEIGHTS = "seg_3d/output/test-1/model_best.pth"
     cfg.TEST.INFERENCE_FILE_NAME = "test_inference.pk"
+
+
+def resume_training(cfg: CN) -> None:
+    cfg.RESUME = True

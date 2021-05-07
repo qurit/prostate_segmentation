@@ -30,10 +30,12 @@ def add_custom_config(cfg: CN) -> None:
     cfg.DATASET.TRAIN_NUM_PATIENTS = 40
     cfg.DATASET.VAL_NUM_PATIENTS = 19
     cfg.TRANSFORMS.deform_sigma = 5
+    cfg.TRANSFORMS.crop = (128, 128)
+    cfg.TRANSFORMS.p_flip = 0.5
 
     # evaluation
     cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "argmax_dice_score", "overlap"]
-    cfg.EARLY_STOPPING.PATIENCE = 200  # set to 0 to disable
+    cfg.EARLY_STOPPING.PATIENCE = 40  # set to 0 to disable
     cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score/Bladder"
     cfg.EARLY_STOPPING.MODE = "max"
 
@@ -42,7 +44,7 @@ def add_custom_config(cfg: CN) -> None:
     cfg.LOSS.PARAMS.ce_weight = 0.
     cfg.LOSS.PARAMS.dice_weight = 1.0
     cfg.LOSS.PARAMS.overlap_weight = 10.
-    cfg.LOSS.PARAMS.class_weight = [1, 3, 1]
+    cfg.LOSS.PARAMS.class_weight = [1, 2, 1]
     cfg.LOSS.PARAMS.device = cfg.MODEL.DEVICE
 
     # optimizer and lr scheduler

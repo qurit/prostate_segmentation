@@ -27,8 +27,6 @@ def add_custom_config(cfg: CN) -> None:
     cfg.OUTPUT_DIR = "seg_3d/output/test-1"
 
     # dataset and transform
-    cfg.DATASET.TRAIN_NUM_PATIENTS = 40
-    cfg.DATASET.VAL_NUM_PATIENTS = 19
     cfg.TRANSFORMS.deform_sigma = 5
 
     # evaluation

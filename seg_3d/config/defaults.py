@@ -89,7 +89,7 @@ _C.EARLY_STOPPING.MODE = "min"
 # EVAL
 # -----------------------------------------------------------------------------
 _C.TEST = CN()
-_C.TEST.EVAL_PERIOD = 0  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
+_C.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model during training. Set to 0 to disable
 # metrics which get computed during eval, available metrics found inside evaluation/metrics.py
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []

@@ -37,7 +37,7 @@ class JointTransform2D:
         self.div_by_max = div_by_max
         self.test = test
 
-        if deform_sigma:
+        if deform_sigma and not self.test:
             self.deform = lambda x, y: \
                 elasticdeform.deform_random_grid([x, *y], sigma=deform_sigma,
                                                  order=[3, *[0] * len(y)])  # order must be 0 for mask arrays
@@ -71,7 +71,7 @@ class JointTransform2D:
             else:
                 image, mask = T.CenterCrop(self.crop[0])(image), T.CenterCrop(self.crop[0])(mask)
 
-        if self.p_flip and np.random.rand() < self.p_flip:
+        if self.p_flip and not self.test and np.random.rand() < self.p_flip:
             image, mask = F.hflip(image), F.hflip(mask)
 
         return image, mask

@@ -125,7 +125,7 @@ def train(model):
                             pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
                         # save best metrics to a .txt file
                         with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
-                            json.dump(results["metrics"], f)
+                            json.dump(results["metrics"], f, indent=4)
 
                     elif early_stopping.triggered:
                         break

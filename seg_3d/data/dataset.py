@@ -108,9 +108,8 @@ class ImageToImage3D(Dataset):
             evaluates to False, torchvision.transforms.ToTensor will be used on both image and mask.
     """
 
-    def __init__(self, dataset_path: str, modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
+    def __init__(self, dataset_path: str or List[str], modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
                  joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None) -> None:
-        self.dataset_path = dataset_path
         self.modality = modality
         self.patient_keys = patient_keys
         self.rois = rois
@@ -119,8 +118,14 @@ class ImageToImage3D(Dataset):
         self.num_patients = num_patients  # used for train-val-test split
         self.logger = logging.getLogger(__name__)
 
-        with open(os.path.join(dataset_path, "global_dict.json")) as file_obj:
-            self.dataset_dict = json.load(file_obj)
+        if type(dataset_path) is str:
+            self.dataset_path = [dataset_path]
+
+        self.dataset_dict = {}
+        # handle case if multiple dataset paths passed
+        for dp in dataset_path:
+            with open(os.path.join(dp, "global_dict.json")) as file_obj:
+                self.dataset_dict = {**self.dataset_dict, **json.load(file_obj)}
 
         # if no patients specified then select all from dataset
         if patient_keys is None:
@@ -132,6 +137,8 @@ class ImageToImage3D(Dataset):
             # keep track of excluded patients from selected
             self.excluded_patients = list(set(self.patient_keys) - set(selected_patients))
             self.patient_keys = selected_patients
+        else:
+            self.excluded_patients = list(set(self.dataset_dict.keys()) - set(self.patient_keys))
 
         all_frame_fps = {patient: glob.glob('data/' + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
                          for patient in self.patient_keys}

@@ -38,9 +38,11 @@ def train(model):
     val_dataset = ImageToImage3D(joint_transform=val_transforms,
                                  dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                  num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
-                                 patient_keys=train_dataset.excluded_patients,
+                                 patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
                                  **cfg.DATASET.PARAMS)
-    logger.info("Patient keys excluded from train-val split: {}".format(val_dataset.excluded_patients))
+
+    assert len(np.intersect1d(train_dataset.patient_keys, val_dataset.patient_keys)) == 0,\
+        "duplicate patients in train and val split!"
 
     # get optimizer specified in config file
     optimizer = get_optimizer(cfg)(model.parameters(), **cfg.SOLVER.PARAMS)

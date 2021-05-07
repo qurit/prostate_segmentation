@@ -20,8 +20,8 @@ _C.MODEL.BACKBONE.NAME = "UNet3D"
 _C.DATASET = CN()
 _C.DATASET.PARAMS = CN(new_allowed=True)
 
-_C.DATASET.TRAIN_DATASET_PATH = "data/image_dataset"
-_C.DATASET.TEST_DATASET_PATH = "data/test_dataset"
+_C.DATASET.TRAIN_DATASET_PATH = ("data/image_dataset",)
+_C.DATASET.TEST_DATASET_PATH = ("data/test_dataset",)
 
 _C.DATASET.TRAIN_NUM_PATIENTS = None
 _C.DATASET.VAL_NUM_PATIENTS = None

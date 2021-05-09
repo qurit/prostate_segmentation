@@ -31,7 +31,7 @@ class JointTransform2D:
         p_flip: float, the probability of performing a random horizontal flip.
     """
 
-    def __init__(self, test=False, crop=(100, 100), p_flip=0.5, deform_sigma=None, div_by_max=True):
+    def __init__(self, test=False, crop=(100, 100), p_flip=0.5, deform_sigma=None, deform_points=(3, 3, 3), div_by_max=True):
         self.crop = crop
         self.p_flip = p_flip
         self.div_by_max = div_by_max
@@ -39,7 +39,7 @@ class JointTransform2D:
 
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
-                elasticdeform.deform_random_grid([x, *y], sigma=deform_sigma,
+                elasticdeform.deform_random_grid([x, *y], sigma=deform_sigma, points=deform_points,
                                                  order=[3, *[0] * len(y)])  # order must be 0 for mask arrays
         else:
             self.deform = lambda x, y: [x, *y]
@@ -161,11 +161,11 @@ class ImageToImage3D(Dataset):
         # read image
         image = np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps]).astype(np.float32)
         # keep a copy of the unmodified image
-        orig_image = np.copy(image)
 
         # read mask image
         masks_array = self.get_mask(patient, image)
         image = centre_crop(image, (self.num_slices, *self.crop_size))
+        orig_image = np.copy(image)
         masks = [centre_crop(mask, (self.num_slices, *self.crop_size)) for mask in masks_array]
 
         # clip values if modality is CT, no preprocessing of values necessary for PET

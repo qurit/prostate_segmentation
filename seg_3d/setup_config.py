@@ -28,6 +28,7 @@ def add_custom_config(cfg: CN) -> None:
 
     # dataset and transform
     cfg.TRANSFORMS.deform_sigma = 5
+    cfg.TRANSFORMS.deform_points = (2, 2, 2)
     cfg.TRANSFORMS.crop = (128, 128)
     cfg.TRANSFORMS.p_flip = 0.5
 

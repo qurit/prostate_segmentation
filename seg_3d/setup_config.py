@@ -39,12 +39,13 @@ def add_custom_config(cfg: CN) -> None:
     cfg.EARLY_STOPPING.MODE = "max"
 
     # loss
-    cfg.LOSS.FN = "CEDiceLoss"
-    cfg.LOSS.PARAMS.ce_weight = 0.
+    cfg.LOSS.FN = "BCEDiceWithOverlapLoss"
+    cfg.LOSS.PARAMS.bce_weight = 0.
     cfg.LOSS.PARAMS.dice_weight = 1.0
     cfg.LOSS.PARAMS.overlap_weight = 10.
-    cfg.LOSS.PARAMS.class_weight = [1, 2, 1]
-    cfg.LOSS.PARAMS.device = cfg.MODEL.DEVICE
+    # tuple containing the channel indices of pred, gt for overlap computation: (pred bladder channel, gt tumor channel)
+    cfg.LOSS.PARAMS.overlap_idx = (1, 2)
+    cfg.LOSS.PARAMS.class_weight = [0, 2, 1]  # background, bladder, tumor weight
 
     # optimizer and lr scheduler
     cfg.SOLVER.PARAMS.lr = 0.0001

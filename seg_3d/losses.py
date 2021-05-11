@@ -1,4 +1,6 @@
 # original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/losses.py
+import logging
+
 import torch
 import torch.nn.functional as F
 from torch import nn as nn
@@ -31,8 +33,6 @@ class _AbstractDiceLoss(nn.Module):
             self.normalization = nn.Softmax(dim=1)
         else:
             self.normalization = lambda x: x
-        
-        self.weight = weight
 
     def dice(self, input, target, weight):
         # actual Dice score computation; to be implemented by the subclass
@@ -43,10 +43,11 @@ class _AbstractDiceLoss(nn.Module):
         input = self.normalization(input)
 
         # compute per channel Dice coefficient
-        per_channel_dice = self.dice(input, target)
+        per_channel_dice = self.dice(input, target, self.weight)
 
-        # average Dice score across all channels/classes
-        return (1. - per_channel_dice)
+        # return Dice scores for all channels/classes
+        return 1. - per_channel_dice
+
 
 @LOSS_REGISTRY.register()
 class DiceLoss(_AbstractDiceLoss):
@@ -114,40 +115,48 @@ class BCEDiceLoss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
-class CEDiceLoss(nn.Module):
-    """Linear combination of CE and Dice losses"""
+class BCEDiceWithOverlapLoss(nn.Module):
+    """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, ce_weight, dice_weight, overlap_weight, class_weight=None, device=None):
-        super(CEDiceLoss, self).__init__()
-        self.ce_weight = ce_weight
+    def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2), class_weight=None):
+        super(BCEDiceWithOverlapLoss, self).__init__()
+        self.bce_weight = bce_weight
+        self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
+        self.dice = DiceLoss(normalization="softmax")
         self.overlap_weight = overlap_weight
+        self.overlap_idx = overlap_idx  # tuple containing the channel indices of pred, gt for overlap computation
+        self.logger = logging.getLogger(__name__)
 
         if class_weight is not None:
-            class_weight = torch.as_tensor(class_weight, dtype=torch.float)
-        if device:
-            class_weight = class_weight.to(device)
+            self.class_weight = torch.as_tensor(class_weight, dtype=torch.float)
+        else:
+            self.class_weight = torch.as_tensor(1)
 
-        self.cross_entropy = nn.BCEWithLogitsLoss()
-        self.dice = DiceLoss(weight=class_weight, normalization="softmax")
+    def overlap(self, pred, gt):
+        # get the right channels from pred and gt tensors
+        pred = pred[:, self.overlap_idx[0], ...]
+        gt = gt[:, self.overlap_idx[1], ...]
 
-        self.smax = nn.Softmax(dim=1)
+        if gt.sum() != 0:
+            return (nn.Softmax(dim=1)(pred) * gt).sum() / gt.sum()
 
-        self.overlap = lambda pred, gt: (self.smax(pred)[:, 1, :, :, :] * gt).sum() / gt.sum()
+        return 0.
 
     def forward(self, input, target):
-        ce = self.cross_entropy(input, target.float())
-        dice = self.dice(input, target)
-        dice_verbose = 1 - dice.detach().cpu().numpy()
+        bce_loss = self.bce(input, target.float())
+        dice_loss = self.dice(input, target)
+        # get raw dice scores
+        dice_verbose = 1 - dice_loss.detach().cpu().numpy()
+        # apply per channel weighting to dice
+        dice_loss *= self.class_weight.to(dice_loss.device)
+        overlap_loss = self.overlap(input, target)
 
-        if target[:, 2, :, :, :].sum() != 0:
-            overlap_loss = self.overlap(input, target[:, 2, :, :, :])
-        else:
-            overlap_loss = 0.
+        self.logger.info('BCE: {:.8f} Overlap: {:.8} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'
+                         .format(bce_loss, overlap_loss, *dice_verbose))
 
-        print('BCE: {:.8f} Overlap: {:.8} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'.format(ce, overlap_loss, *dice_verbose))
+        return self.bce_weight * bce_loss + self.dice_weight * dice_loss.sum() + self.overlap_weight * overlap_loss
 
-        return self.ce_weight * ce + self.dice_weight * dice.sum() + self.overlap_weight * overlap_loss
 
 @LOSS_REGISTRY.register()
 class WeightedCrossEntropyLoss(nn.Module):

@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import Callable
 
 import tqdm
 import torch
@@ -7,17 +8,18 @@ from torch.utils.data import DataLoader
 
 
 class Evaluator:
-    def __init__(self, device, loss, dataset, metric_list):
+    def __init__(self, device, dataset, metric_list, loss: Callable = None):
         self.device = device
-        self.loss = loss
         self.dataset = dataset
         self.metric_list = metric_list
+        self.loss = loss
         self.logger = logging.getLogger(__name__)
 
     def evaluate(self, model):
         self.logger.info("Starting inference on dataset of size {}...".format(self.dataset.__len__()))
         self.metric_list.reset()
-        self.metric_list.results["val_loss"] = []  # add an entry for val loss
+        if self.loss:
+            self.metric_list.results["val_loss"] = []  # add an entry for val loss
         model.eval()
 
         inference_dict = {}
@@ -29,7 +31,9 @@ class Evaluator:
                 labels = data_input["gt_mask"].squeeze(1).long().to(self.device)
 
                 preds = model(sample).detach()
-                self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
+
+                if self.loss:
+                    self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
 
                 # apply final activation on preds
                 preds = model.final_activation(preds)

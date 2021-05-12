@@ -1,4 +1,4 @@
-from detectron2.config import CfgNode
+from fvcore.common.config import CfgNode
 
 __all__ = ['get_cfg']
 

@@ -20,13 +20,25 @@ class EarlyStopping:
         self.best = None
         self.triggered = False
 
-    def check_is_valid(self, metric_list):
+    def check_is_valid(self, metric_list, class_labels="") -> None:
         metric_keys = ["val_loss", *metric_list.metrics.keys()]
-        if self.monitor not in metric_keys:
+        monitor = self.monitor.split("/")
+        is_valid = True
+
+        if len(monitor) > 1:
+            metric_name, label_name = monitor
+            if metric_name not in metric_keys or label_name not in class_labels:
+                is_valid = False
+
+        elif self.monitor not in metric_keys:
+            is_valid = False
+
+        if not is_valid:
             self.logger.warning("Early stopping enabled but cannot find metric: \'%s\'" % self.monitor)
             self.logger.warning("Options for monitored metrics are: [%s]" % ", ".join(map(str, metric_keys)))
+            self.logger.warning("Disabling early stopping by setting patience to 0...")
             # disable early stopping
-            # self.patience = 0
+            self.patience = 0
 
     def get_es_result(self, current) -> bool:
         """Returns true if monitored metric has been improved"""

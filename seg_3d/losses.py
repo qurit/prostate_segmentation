@@ -56,7 +56,7 @@ class DiceLoss(_AbstractDiceLoss):
     The input to the loss function is assumed to be a logit and will be normalized by the Sigmoid function.
     """
 
-    def __init__(self, weight=None, normalization='softmax'):
+    def __init__(self, weight=None, normalization='sigmoid'):
         super().__init__(weight, normalization)
 
     def dice(self, input, target, weight=None):
@@ -123,7 +123,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
-        self.dice = DiceLoss(normalization="softmax")  # TODO: should be sigmoid?
+        self.dice = DiceLoss(normalization="sigmoid")
         self.overlap_weight = overlap_weight
         self.overlap_idx = overlap_idx  # tuple containing the channel indices of pred, gt for overlap computation
         self.logger = logging.getLogger(__name__)

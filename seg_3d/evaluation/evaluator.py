@@ -28,7 +28,7 @@ class Evaluator:
                                              total=self.dataset.__len__(), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"].to(self.device)
-                labels = data_input["gt_mask"].squeeze(1).long().to(self.device)
+                labels = data_input["gt_mask"].squeeze(1).to(self.device)
 
                 preds = model(sample).detach()
 

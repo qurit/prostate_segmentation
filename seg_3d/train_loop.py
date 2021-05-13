@@ -27,12 +27,18 @@ def train(model):
     model.train()
 
     # get training and validation datasets
-    transform_augmentations = JointTransform2D(test=False, **cfg.TRANSFORMS)
-    train_dataset = ImageToImage3D(joint_transform=transform_augmentations,
+    train_transforms = JointTransform2D(test=False, **cfg.TRANSFORMS)
+    train_dataset = ImageToImage3D(joint_transform=train_transforms,
                                    dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                    num_patients=cfg.DATASET.TRAIN_NUM_PATIENTS,
                                    patient_keys=cfg.DATASET.TRAIN_PATIENT_KEYS,
                                    **cfg.DATASET.PARAMS)
+
+    # if no patient keys specified for val then pass in the patients keys from excluded set in train
+    if cfg.DATASET.VAL_PATIENT_KEYS is None:
+        cfg.DATASET.defrost()
+        cfg.DATASET.VAL_PATIENT_KEYS = train_dataset.excluded_patients
+        cfg.freeze()
 
     val_transforms = JointTransform2D(test=True, **cfg.TRANSFORMS)
     val_dataset = ImageToImage3D(joint_transform=val_transforms,
@@ -91,7 +97,7 @@ def train(model):
 
                 storage.step()
                 sample = batched_inputs["image"]
-                labels = batched_inputs["gt_mask"].squeeze(1).long().to(cfg.MODEL.DEVICE)
+                labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
 
                 # do a forward pass, input is of shape (N, C, D, H, W)
                 preds = model(sample).squeeze(1)

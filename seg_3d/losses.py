@@ -118,12 +118,12 @@ class BCEDiceLoss(nn.Module):
 class BCEDiceWithOverlapLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2), class_weight=None):
+    def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2), class_weight=None, normalization="sigmoid"):
         super(BCEDiceWithOverlapLoss, self).__init__()
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
-        self.dice = DiceLoss(normalization="sigmoid")
+        self.dice = DiceLoss(normalization=normalization)
         self.overlap_weight = overlap_weight
         self.overlap_idx = overlap_idx  # tuple containing the channel indices of pred, gt for overlap computation
         self.logger = logging.getLogger(__name__)

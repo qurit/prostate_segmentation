@@ -178,7 +178,8 @@ def run():
 
         # init eval metrics and evaluator
         metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
-        evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset, metric_list=metric_list)
+        evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
+                              metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
 
         results = evaluator.evaluate(model)
         # save inference results
@@ -190,18 +191,24 @@ def run():
 
 
 if __name__ == '__main__':
-    # setup config
-    cfg = setup_config()
-    cfg.freeze()
+    # specify params to change for each run to launch consecutive trainings
+    # each inner list corresponds to the list of keys, values to change for a particular run
+    # e.g. param_search = [["A", 1, "B", 2], ["C", 3"]] -> in 1st run set param A to 1 and param B to 2, in 2nd run set param C to 3
+    # NOTE: training runs will be overwritten if OUTPUT_DIR is not unique
+    param_search = [[]]  # empty list will run a single training
 
-    # setup loggers for the various modules
-    setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")
-    setup_logger(output=cfg.OUTPUT_DIR, name="fvcore")
-    setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
-    logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
+    for params in param_search:
+        cfg = setup_config(*params)
+        cfg.freeze()
 
-    # create directory to store output files
-    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+        # setup loggers for the various modules
+        setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")
+        setup_logger(output=cfg.OUTPUT_DIR, name="fvcore")
+        setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
+        logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
 
-    # run train loop
-    run()
+        # create directory to store output files
+        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+
+        # run train loop
+        run()

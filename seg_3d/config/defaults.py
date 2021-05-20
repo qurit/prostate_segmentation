@@ -94,6 +94,7 @@ _C.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []
 _C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation
+_C.TEST.THRESHOLDS = None
 
 # -----------------------------------------------------------------------------
 # PIPELINE MODES

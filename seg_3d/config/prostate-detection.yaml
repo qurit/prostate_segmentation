@@ -1,0 +1,23 @@
+_BASE_: Base-3D-UNet.yaml
+MODEL:
+  UNET:
+    out_channels: 2
+LOSS:
+  FN: BCEDiceLoss
+  PARAMS:
+    bce_weight: 1.
+    dice_weight: 1.
+DATASET:
+  TRAIN_DATASET_PATH:
+  - data/image_dataset
+  TEST_DATASET_PATH:
+  - data/image_dataset
+  TRAIN_NUM_PATIENTS: 40
+  VAL_NUM_PATIENTS: 19
+  CLASS_LABELS:
+    - Background
+    - Prostate
+  PARAMS:
+    modality: CT
+    rois:
+    - Inter

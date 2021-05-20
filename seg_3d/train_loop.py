@@ -27,12 +27,18 @@ def train(model):
     model.train()
 
     # get training and validation datasets
-    transform_augmentations = JointTransform2D(test=False, **cfg.TRANSFORMS)
-    train_dataset = ImageToImage3D(joint_transform=transform_augmentations,
+    train_transforms = JointTransform2D(test=False, **cfg.TRANSFORMS)
+    train_dataset = ImageToImage3D(joint_transform=train_transforms,
                                    dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                    num_patients=cfg.DATASET.TRAIN_NUM_PATIENTS,
                                    patient_keys=cfg.DATASET.TRAIN_PATIENT_KEYS,
                                    **cfg.DATASET.PARAMS)
+
+    # if no patient keys specified for val then pass in the patients keys from excluded set in train
+    if cfg.DATASET.VAL_PATIENT_KEYS is None:
+        cfg.DATASET.defrost()
+        cfg.DATASET.VAL_PATIENT_KEYS = train_dataset.excluded_patients
+        cfg.freeze()
 
     val_transforms = JointTransform2D(test=True, **cfg.TRANSFORMS)
     val_dataset = ImageToImage3D(joint_transform=val_transforms,
@@ -91,7 +97,7 @@ def train(model):
 
                 storage.step()
                 sample = batched_inputs["image"]
-                labels = batched_inputs["gt_mask"].squeeze(1).long().to(cfg.MODEL.DEVICE)
+                labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
 
                 # do a forward pass, input is of shape (N, C, D, H, W)
                 preds = model(sample).squeeze(1)
@@ -172,7 +178,8 @@ def run():
 
         # init eval metrics and evaluator
         metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
-        evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset, metric_list=metric_list)
+        evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
+                              metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
 
         results = evaluator.evaluate(model)
         # save inference results
@@ -184,18 +191,24 @@ def run():
 
 
 if __name__ == '__main__':
-    # setup config
-    cfg = setup_config()
-    cfg.freeze()
+    # specify params to change for each run to launch consecutive trainings
+    # each inner list corresponds to the list of keys, values to change for a particular run
+    # e.g. param_search = [["A", 1, "B", 2], ["C", 3"]] -> in 1st run set param A to 1 and param B to 2, in 2nd run set param C to 3
+    # NOTE: training runs will be overwritten if OUTPUT_DIR is not unique
+    param_search = [[]]  # empty list will run a single training
 
-    # setup loggers for the various modules
-    setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")
-    setup_logger(output=cfg.OUTPUT_DIR, name="fvcore")
-    setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
-    logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
+    for params in param_search:
+        cfg = setup_config(*params)
+        cfg.freeze()
 
-    # create directory to store output files
-    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+        # setup loggers for the various modules
+        setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")
+        setup_logger(output=cfg.OUTPUT_DIR, name="fvcore")
+        setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
+        logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
 
-    # run train loop
-    run()
+        # create directory to store output files
+        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+
+        # run train loop
+        run()

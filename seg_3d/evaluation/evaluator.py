@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Callable
+from typing import Callable, List
 
 import tqdm
 import torch
@@ -8,11 +8,12 @@ from torch.utils.data import DataLoader
 
 
 class Evaluator:
-    def __init__(self, device, dataset, metric_list, loss: Callable = None):
+    def __init__(self, device, dataset, metric_list, loss: Callable = None, thresholds: List[float] = None):
         self.device = device
         self.dataset = dataset
         self.metric_list = metric_list
         self.loss = loss
+        self.thresholds = thresholds
         self.logger = logging.getLogger(__name__)
 
     def evaluate(self, model):
@@ -28,7 +29,7 @@ class Evaluator:
                                              total=self.dataset.__len__(), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"].to(self.device)
-                labels = data_input["gt_mask"].squeeze(1).long().to(self.device)
+                labels = data_input["gt_mask"].squeeze(1).to(self.device)
 
                 preds = model(sample).detach()
 
@@ -37,6 +38,10 @@ class Evaluator:
 
                 # apply final activation on preds
                 preds = model.final_activation(preds)
+
+                # apply thresholding if it is specified
+                if self.thresholds is not None:
+                    preds = self.threshold_predictions(preds)
 
                 self.metric_list(preds, labels)
 
@@ -64,3 +69,6 @@ class Evaluator:
                 **self.metric_list.get_results(average=True)
             }
         }
+
+    def threshold_predictions(self, preds):
+        return NotImplementedError  # TODO

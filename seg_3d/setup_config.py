@@ -5,9 +5,12 @@ import seg_3d.modeling.backbone.unet
 import seg_3d.modeling.meta_arch.segnet
 
 
-def setup_config() -> CN:
+def setup_config(*args) -> CN:
     # get the default config from default.py
     cfg = get_cfg()
+
+    # loads params from args
+    cfg.merge_from_list(list(args))
 
     # load params from existing yaml
     cfg.CONFIG_FILE = "seg_3d/config/bladder-detection.yaml"
@@ -59,6 +62,8 @@ def add_inference_config(cfg: CN) -> None:
     cfg.EVAL_ONLY = True
     cfg.MODEL.WEIGHTS = "seg_3d/output/test-1/model_best.pth"
     cfg.TEST.INFERENCE_FILE_NAME = "test_inference.pk"
+    cfg.MODEL.UNET.final_sigmoid = False
+    cfg.TEST.THRESHOLDS = None
 
 
 def resume_training(cfg: CN) -> None:

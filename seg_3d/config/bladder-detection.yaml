@@ -2,6 +2,16 @@ _BASE_: Base-3D-UNet.yaml
 MODEL:
   UNET:
     out_channels: 3  # channels are background, bladder, tumor
+LOSS:
+  FN: BCEDiceWithOverlapLoss
+  PARAMS:
+    bce_weight: 1.
+    dice_weight: 1.
+    overlap_weight: 10.
+    overlap_idx: (1, 2)  # tuple containing channel indices of pred, gt for overlap computation
+                         # (pred bladder channel, gt tumor channel)
+    class_weight: [0, 1, 1]  # set weight for background to 0
+    normalization: sigmoid
 TRANSFORMS:
   div_by_max: True
 DATASET:

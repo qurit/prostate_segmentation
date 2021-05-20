@@ -108,8 +108,9 @@ class ImageToImage3D(Dataset):
             evaluates to False, torchvision.transforms.ToTensor will be used on both image and mask.
     """
 
-    def __init__(self, dataset_path: str or List[str], modality: str, rois: List[str], num_slices: int, crop_size: Tuple[int],
-                 joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None) -> None:
+    def __init__(self, dataset_path: str or List[str], modality: str, rois: List[str], num_slices: int = None,
+                 crop_size: Tuple[int] = None, joint_transform: Callable = None, patient_keys: List[str] = None,
+                 num_patients: int = None) -> None:
         self.modality = modality
         self.patient_keys = patient_keys
         self.rois = rois
@@ -142,6 +143,11 @@ class ImageToImage3D(Dataset):
 
         all_frame_fps = {patient: glob.glob('data/' + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
                          for patient in self.patient_keys}
+
+        # if num slices not specified then get the shortest scan length
+        if self.num_slices is None:
+            self.num_slices = min(len(i) for i in list(all_frame_fps.values()))
+
         # sort the frame_fps based on number in the .dcm file name
         self.all_frame_fps = {patient: sorted(all_frame_fps[patient],
                                               key=lambda x: int(os.path.basename(x).split('.')[0]))[:self.num_slices]
@@ -163,10 +169,15 @@ class ImageToImage3D(Dataset):
         # keep a copy of the unmodified image
 
         # read mask image
-        masks_array = self.get_mask(patient, image)
-        image = centre_crop(image, (self.num_slices, *self.crop_size))
+        masks = self.get_mask(patient, image)
+
+        # apply centre crop
+        if self.crop_size is not None:
+            image = centre_crop(image, (self.num_slices, *self.crop_size))
+            masks = [centre_crop(mask, (self.num_slices, *self.crop_size)) for mask in masks]
+
+        # keep copy of image before joint transform
         orig_image = np.copy(image)
-        masks = [centre_crop(mask, (self.num_slices, *self.crop_size)) for mask in masks_array]
 
         # clip values if modality is CT, no preprocessing of values necessary for PET
         if self.modality == "CT":

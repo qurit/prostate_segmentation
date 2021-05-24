@@ -7,6 +7,7 @@ LOSS:
   PARAMS:
     bce_weight: 1.
     dice_weight: 1.
+    normalization: sigmoid
 DATASET:
   TRAIN_DATASET_PATH:
   - data/image_dataset
@@ -21,3 +22,7 @@ DATASET:
     modality: CT
     rois:
     - Inter
+    crop_size:
+      - 200
+      - 200
+    num_slices: 100

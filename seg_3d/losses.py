@@ -152,7 +152,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         dice_loss *= self.class_weight.to(dice_loss.device)
         overlap_loss = self.overlap(input, target)
 
-        self.logger.info('BCE: {:.8f} Overlap: {:.8} Dice - BG: {:.4f} Bladder: {:.4f} Tumor: {:.4f}'
+        self.logger.info(("BCE: {:.8f} Overlap: {:.8} Dice: " + "{:.4f}, " * target.shape[1])
                          .format(bce_loss, overlap_loss, *dice_verbose))
 
         return self.bce_weight * bce_loss + self.dice_weight * dice_loss.sum() + self.overlap_weight * overlap_loss

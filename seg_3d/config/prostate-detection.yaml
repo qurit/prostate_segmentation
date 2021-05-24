@@ -23,6 +23,6 @@ DATASET:
     rois:
     - Inter
     crop_size:
-      - 256
-      - 256
-    num_slices: 128
+      - 200
+      - 200
+    num_slices: 100

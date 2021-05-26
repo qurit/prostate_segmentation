@@ -40,10 +40,10 @@ class JointTransform2D:
 
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
-                elasticdeform.deform_random_grid([x, *y], sigma=deform_sigma, points=deform_points,
-                                                 order=[3, *[0] * len(y)])  # order must be 0 for mask arrays
+                elasticdeform.deform_random_grid([*x, *y], sigma=deform_sigma, points=deform_points,
+                                                 order=[*[3] * len(x), *[0] * len(y)])  # order must be 0 for mask arrays
         else:
-            self.deform = lambda x, y: [x, *y]
+            self.deform = lambda x, y: [*x, *y]
 
     def __call__(self, image, masks):
 
@@ -51,8 +51,12 @@ class JointTransform2D:
         if self.div_by_max:
             image = image / np.max(image)
 
-        sample_data = self.deform(image, masks)  # TODO: handle case when multiple channels
-        image, masks = sample_data[0], sample_data[1:]
+        # get number of channels in image
+        img_channels = len(image)
+
+        # apply elastic deformation if specified
+        sample_data = self.deform(image, masks)
+        image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
         # fix channel for background
         bg = np.ones_like(masks[0])

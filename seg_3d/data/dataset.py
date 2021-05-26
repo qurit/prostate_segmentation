@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import os
+from collections import OrderedDict
 from typing import Callable
 from typing import List, Tuple
 
@@ -225,7 +226,7 @@ class ImageToImage3D(Dataset):
         raw_resolution = {modality: np.shape(image_dict[modality][0]) for modality in self.modality}
 
         # get specified roi data from dataset FIXME: assume it doesn't matter which modality roi data is taken from
-        roi_data = {}
+        roi_data = OrderedDict()
         for roi_name in self.rois:
             # check to see if specified rois exist
             for i, modality in enumerate(self.modality):
@@ -234,50 +235,47 @@ class ImageToImage3D(Dataset):
                     break
                 # if on last iteration roi_name still not found then print warning
                 elif i == len(self.modality) - 1:
-                    self.logger.warning("Roi '{}' does not exist in dataset! Ignoring...".format(roi_name))
+                    # self.logger.warning("Roi '{}' does not exist in dataset! Ignoring...".format(roi_name))
+                    pass
 
         # build mask object for each roi
-        mask = {
+        mask = OrderedDict({
             roi_name: np.asarray(
                 [contour2mask(roi_data[(roi_name, modality)][frame], raw_resolution[modality])
                  for frame in range(self.num_slices)]
             ) for roi_name, modality in roi_data
-        }
+        })
 
         if "Tumor" in self.rois:
             # call helper function to process tumor mask
-            mask = self.process_tumor_mask(mask)
+            self.process_tumor_mask(mask)
         else:
             # add logic here for other combinations of rois
             pass
 
         # make a dummy mask for the background channel, will be fixed in the transform step
-        bg = np.zeros_like(list(mask.values())[0])
+        mask["Background"] = np.zeros_like(list(mask.values())[0])
+        mask.move_to_end("Background", last=False)  # make background the first channel
 
-        return {
-            "Background": bg, **mask
-        }
+        return mask
 
-    def process_tumor_mask(self, mask) -> dict:
+    def process_tumor_mask(self, mask):
         tumor_keys = [x for x in mask.keys() if "Tumor" in x]
-        tumor_mask = np.zeros_like(list(mask.values())[0])
+        tumor_mask = np.zeros_like(mask["Tumor"])
 
         # merge Tumor rois into a single channel
         for tum in tumor_keys:
             tumor_mask += mask[tum]
-            del mask[tum]
+            if tum != "Tumor":
+                del mask[tum]
 
         tumor_mask[tumor_mask > 1] = 1
 
         if "Bladder" in self.rois:
             mask["Bladder"][tumor_mask == 1] = 0  # ensure there is no overlap in gt bladder mask
 
-        # return new mask object just with Bladder and Tumor roi
-        # if dataset has no tumor mask but "Tumor" is specified in self.rois then an empty mask
-        # is returned for Tumor channel
-        return {
-            "Tumor": tumor_mask, **mask
-        }
+        # update tumor mask in the mask dict
+        mask["Tumor"] = tumor_mask
 
     def resample_numpy_data(self, image_dict, resample=Image.BICUBIC) -> np.ndarray:
         for key in image_dict:

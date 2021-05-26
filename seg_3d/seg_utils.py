@@ -212,7 +212,7 @@ class DefaultTensorboardFormatter(_TensorboardFormatter):
         if name == 'targets' and self.skip_last_target:
             batch = batch[:, :-1, ...]
 
-        tag_template = '{}/batch_{}/channel_{}/slice_{}'
+        tag_template = '{}/batch_{}/channel_{}/slice_{}'  # TODO: improve naming
 
         tagged_images = []
 

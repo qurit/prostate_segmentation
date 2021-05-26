@@ -31,7 +31,7 @@ _C.DATASET.TRAIN_PATIENT_KEYS = None
 _C.DATASET.VAL_PATIENT_KEYS = None
 _C.DATASET.TEST_PATIENT_KEYS = None
 
-_C.DATASET.PARAMS.modality = "PT"
+_C.DATASET.PARAMS.modality = None
 _C.DATASET.PARAMS.rois = ["Bladder"]
 _C.DATASET.PARAMS.num_slices = None  # number of slices in axial plane, if None then selects shortest scan length from dataset
 _C.DATASET.PARAMS.crop_size = None  # size of centre crop, if None then no centre cropping done

@@ -10,6 +10,7 @@ import elasticdeform
 import numpy as np
 import pydicom as dicom
 import torch
+from torch.utils import data
 from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
@@ -121,8 +122,11 @@ class ImageToImage3D(Dataset):
 
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
+        else:
+            self.dataset_path = dataset_path
 
         self.dataset_dict = {}
+
         # handle case if multiple dataset paths passed
         for dp in dataset_path:
             with open(os.path.join(dp, "global_dict.json")) as file_obj:
@@ -140,8 +144,7 @@ class ImageToImage3D(Dataset):
             self.patient_keys = selected_patients
         else:
             self.excluded_patients = list(set(self.dataset_dict.keys()) - set(self.patient_keys))
-
-        all_frame_fps = {patient: glob.glob('data/' + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
+        all_frame_fps = {patient: glob.glob('/home/rodrigue/prostate-segmentation/data/' + self.dataset_dict[patient][self.modality]['fp'] + "/*.dcm")
                          for patient in self.patient_keys}
 
         # if num slices not specified then get the shortest scan length

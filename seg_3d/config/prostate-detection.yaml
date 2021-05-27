@@ -3,16 +3,16 @@ MODEL:
   UNET:
     out_channels: 2
 LOSS:
-  FN: BCEDiceLoss
+  FN: WBCEDiceLoss
   PARAMS:
     bce_weight: 1.
     dice_weight: 1.
     normalization: sigmoid
 DATASET:
   TRAIN_DATASET_PATH:
-  - data/image_dataset
+  - /home/rodrigue/prostate-segmentation/data/image_dataset
   TEST_DATASET_PATH:
-  - data/image_dataset
+  - /home/rodrigue/prostate-segmentation/data/image_dataset
   TRAIN_NUM_PATIENTS: 40
   VAL_NUM_PATIENTS: 19
   CLASS_LABELS:

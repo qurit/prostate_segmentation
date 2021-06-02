@@ -97,10 +97,10 @@ def train(model):
 
                 storage.step()
                 sample = batched_inputs["image"]
-                labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
+                labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
 
                 # do a forward pass, input is of shape (N, C, D, H, W)
-                preds = model(sample).squeeze(1)
+                preds = model(sample)
 
                 optimizer.zero_grad()
                 training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips

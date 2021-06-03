@@ -1,5 +1,4 @@
 # original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/dataset.py
-import glob
 import json
 import logging
 import os
@@ -9,14 +8,13 @@ from typing import List, Tuple
 
 import elasticdeform
 import numpy as np
-import pydicom as dicom
 import torch
-from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
-from dicom_code.contour_utils import parse_dicom_image
+from seg_3d.data.image_registration import \
+    read_scan_as_sitk_image, resample_image, convert_image_to_npy, mask_to_sitk_image
 from utils import contour2mask, centre_crop
 
 
@@ -59,11 +57,11 @@ class JointTransform2D:
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
-        # fix channel for background
+        # add channel for background
         bg = np.ones_like(masks[0])
-        for m in masks[1:]:
+        for m in masks:
             bg[bg == m] = 0
-        masks[0] = bg
+        masks = [bg, *masks]
 
         # transforming to tensor
         image = torch.Tensor(image)
@@ -152,18 +150,12 @@ class ImageToImage3D(Dataset):
         else:
             self.excluded_patients = list(set(self.dataset_dict.keys()) - set(self.patient_keys))
 
-        all_frame_fps = {patient: {modality: glob.glob('data/' + self.dataset_dict[patient][modality]['fp'] + "/*.dcm")
-                         for modality in self.modality} for patient in self.patient_keys}
-
-        # if num slices not specified then get the shortest scan length
-        if self.num_slices is None:
-            self.num_slices = min(len(i) for i in list(all_frame_fps.values()))
-
-        # sort the frame_fps based on number in the .dcm file name
-        self.all_frame_fps = {patient: {modality: sorted(all_frame_fps[patient][modality],
-                                                         key=lambda x: int(os.path.basename(x).split('.')[0]))[:self.num_slices]
-                                        for modality in self.modality}
-                              for patient in self.patient_keys}
+        self.all_patient_fps = {
+            patient: {
+                modality: "data/" + self.dataset_dict[patient][modality]["fp"]
+                for modality in self.modality
+            } for patient in self.patient_keys
+        }
 
         if joint_transform is None:
             joint_transform = JointTransform2D(crop=None, p_flip=None, deform_sigma=None, div_by_max=False)
@@ -174,39 +166,64 @@ class ImageToImage3D(Dataset):
 
     def __getitem__(self, idx) -> dict:
         patient = list(self.patient_keys)[idx]
-        frame_fps = self.all_frame_fps[patient]
+        patient_dir = self.all_patient_fps[patient]
 
         # read image
         image_dict = {
-            modality: np.asarray([parse_dicom_image(dicom.dcmread(fp)) for fp in frame_fps[modality]]).astype(np.float32)
-            for modality in self.modality
+            modality: read_scan_as_sitk_image(patient_dir[modality]) for modality in self.modality
         }
 
-        # clip values if modality is CT, no preprocessing of values necessary for PET
+        # get the raw image size for each modality
+        raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modality}
+
+        # resample to specified slice shape
+        if len(self.modality) > 1 and self.slice_shape is not None:
+            # NOTE: this part is hardcoded
+            # downsample CT to slice shape
+            image_dict["CT_orig"], image_dict["CT"] = image_dict["CT"], resample_image(image_dict["CT"],
+                                                                                       size=self.slice_shape)
+            # upsample PT to CT
+            image_dict["PT_orig"], image_dict["PT"] = image_dict["PT"], resample_image(image_dict["PT"],
+                                                                                       reference_image=image_dict["CT"])
+
+        # convert to npy and keep only indices from 0:num_slices
+        image_dict_npy = {
+            modality: convert_image_to_npy(image_dict[modality])[:self.num_slices] for modality in self.modality
+        }
+
+        # clip values for CT
+        # TODO: get SUV values from PET
         if "CT" in self.modality:
-            image_dict["CT"][image_dict["CT"] > 150] = 150
-            image_dict["CT"][image_dict["CT"] < -150] = -150
+            image_dict_npy["CT"][image_dict_npy["CT"] > 150] = 150
+            image_dict_npy["CT"][image_dict_npy["CT"] < -150] = -150
 
-        # if slice shape not specified then take the largest shape of the raw slices
-        if self.slice_shape is None:
-            self.slice_shape = max(
-                np.shape(image_dict[modality])[1:3] for modality in self.modality
-            )
-
-        # read mask data from dataset and return mask dict
-        mask_dict = self.get_mask(patient, image_dict)
-
-        # resample image and mask if necessary and return a single ndarray
-        image = self.resample_numpy_data(image_dict)
-        masks = self.resample_numpy_data(mask_dict, resample=Image.NEAREST)
-
+        # generate single 4D image
+        image = np.asarray([*image_dict_npy.values()])
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)
 
+        # read mask data from dataset and return mask dict
+        mask_dict_npy, roi_to_modality_map = self.get_mask(patient, raw_image_size_dict)
+
+        # resample mask if necessary
+        if len(self.modality) > 1 and self.slice_shape is not None:
+            mask_dict = {
+                roi: mask_to_sitk_image(mask_dict_npy[roi], image_dict[roi_to_modality_map[roi] + "_orig"])
+                for roi in mask_dict_npy
+            }
+
+            for roi in mask_dict:
+                mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image_dict[roi_to_modality_map[roi]])
+                # convert to npy and keep only indices from 0:num_slices
+                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])[:self.num_slices]
+
+        # generate a single ndarray
+        masks = np.asarray([*mask_dict_npy.values()])
+
         # apply centre crop
         if self.crop_size is not None:
-            image = centre_crop(image, (len(image), self.num_slices, *self.crop_size))
-            masks = centre_crop(masks, (len(masks), self.num_slices, *self.crop_size))
+            image = centre_crop(image, (*image.shape[:2], *self.crop_size))
+            masks = centre_crop(masks, (*masks.shape[:2], *self.crop_size))
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, masks)
@@ -218,12 +235,11 @@ class ImageToImage3D(Dataset):
             "patient": patient
         }
 
-    def get_mask(self, patient, image_dict) -> dict:
+    def get_mask(self, patient, image_size_dict) -> dict:
         # get all rois from the dataset
-        patient_rois = {modality: list(self.dataset_dict[patient][modality]['rois'].keys()) for modality in self.modality}
-
-        # get the raw resolutions for each modality
-        raw_resolution = {modality: np.shape(image_dict[modality][0]) for modality in self.modality}
+        patient_rois = {
+            modality: list(self.dataset_dict[patient][modality]['rois'].keys()) for modality in self.modality
+        }
 
         # get specified roi data from dataset FIXME: assume it doesn't matter which modality roi data is taken from
         roi_data = OrderedDict()
@@ -241,10 +257,10 @@ class ImageToImage3D(Dataset):
         # build mask object for each roi
         mask = OrderedDict({
             roi_name: np.asarray(
-                [contour2mask(roi_data[(roi_name, modality)][frame], raw_resolution[modality])
-                 for frame in range(self.num_slices)]
+                [contour2mask(roi_data[(roi_name, modality)][frame], image_size_dict[modality][1:])
+                 for frame in range(image_size_dict[modality][0])]
             ) for roi_name, modality in roi_data
-        })
+        })  # TODO: add empty mask if specified roi does not exist in dataset
 
         if "Tumor" in self.rois:
             # call helper function to process tumor mask
@@ -253,11 +269,13 @@ class ImageToImage3D(Dataset):
             # add logic here for other combinations of rois
             pass
 
-        # make a dummy mask for the background channel, will be fixed in the transform step
-        mask["Background"] = np.zeros_like(list(mask.values())[0])
-        mask.move_to_end("Background", last=False)  # make background the first channel
+        # return a dict which maps roi to modality
+        # TODO: maybe its better to specify roi to modality map in the config
+        roi_to_modality_map = {
+            roi_name: modality for roi_name, modality in roi_data
+        }
 
-        return mask
+        return mask, roi_to_modality_map
 
     def process_tumor_mask(self, mask):
         tumor_keys = [x for x in mask.keys() if "Tumor" in x]
@@ -276,17 +294,3 @@ class ImageToImage3D(Dataset):
 
         # update tumor mask in the mask dict
         mask["Tumor"] = tumor_mask
-
-    def resample_numpy_data(self, image_dict, resample=Image.BICUBIC) -> np.ndarray:
-        for key in image_dict:
-            img = image_dict[key].astype(np.float)
-
-            # if image shape does not match specified slice shape then resample
-            if img.shape[1:3] != self.slice_shape:
-                pil_img = [Image.fromarray(im) for im in img]
-                resampled_img = np.asarray(
-                    [np.asarray(im.resize(self.slice_shape, resample=resample)) for im in pil_img]
-                )
-                image_dict[key] = resampled_img
-
-        return np.asarray([*image_dict.values()])  # convert image dict to a numpy array

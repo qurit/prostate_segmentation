@@ -83,3 +83,10 @@ def mask_to_sitk_image(mask: np.ndarray, image: sitk.Image) -> sitk.Image:
     mask = sitk.GetImageFromArray(mask)
     mask.CopyInformation(image)
     return mask
+
+
+def clamp_image_values(image: sitk.Image, lower_bound: int, upper_bound: int) -> sitk.Image:
+    clamp_filter = sitk.ClampImageFilter()
+    clamp_filter.SetLowerBound(lower_bound)
+    clamp_filter.SetUpperBound(upper_bound)
+    return clamp_filter.Execute(image)

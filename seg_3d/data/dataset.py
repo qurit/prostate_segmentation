@@ -14,7 +14,7 @@ from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
 from seg_3d.data.itk_image_resample import read_scan_as_sitk_image, convert_image_to_npy, \
-    mask_to_sitk_image, combine_pet_ct_image, downsample_image, resample_image
+    mask_to_sitk_image, combine_pet_ct_image, downsample_image, resample_image, clamp_image_values
 from utils import contour2mask, centre_crop
 
 
@@ -177,10 +177,14 @@ class ImageToImage3D(Dataset):
         # get the raw image size for each modality
         raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modality}
 
+        # TODO: get SUV values from PET
+        if "CT" in self.modality:
+            image_dict["CT"] = clamp_image_values(image=image_dict["CT"], lower_bound=-150, upper_bound=150)
+
         # read mask data from dataset and return mask dict
         mask_dict_npy = self.get_mask(patient, raw_image_size_dict)
 
-        # resample to specified slice shape
+        # perform resampling if multi channel/modality is specified
         if {*self.modality} == {"PT", "CT"} and self.slice_shape is not None:
             reference_size = [*self.slice_shape, raw_image_size_dict["CT"][0]]  # assumes PET and CT have same image spacing in z direction
             image = combine_pet_ct_image(pet_image=image_dict["PT"],
@@ -193,27 +197,22 @@ class ImageToImage3D(Dataset):
 
             for roi in mask_dict:
                 mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image)
-                # convert to npy and keep only indices from 0 to num_slices
+                # convert to npy and keep specified slices
                 mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])[:self.num_slices]
 
-        # TODO: handle case when not doing multi channel
-        image = np.moveaxis(
-            convert_image_to_npy(image), source=-1, destination=0
-        )[:, :self.num_slices]
+            # convert image to npy, keep specified slices, and set channels as first dimension
+            image = np.moveaxis(
+                convert_image_to_npy(image), source=-1, destination=0
+            )[:, :self.num_slices]
 
-        # # convert to npy and keep only indices from 0:num_slices
-        # image_dict_npy = {
-        #     modality: convert_image_to_npy(image_dict[modality])[:self.num_slices] for modality in self.modality
-        # }
-        #
-        # # TODO: clip values for CT
-        # # TODO: get SUV values from PET
-        # if "CT" in self.modality:
-        #     image_dict_npy["CT"][image_dict_npy["CT"] > 150] = 150
-        #     image_dict_npy["CT"][image_dict_npy["CT"] < -150] = -150
-        #
-        # # generate single 4D image
-        # image = np.asarray([*image_dict_npy.values()])
+        else:
+            # convert to npy and keep specified slices
+            image_dict_npy = {
+                modality: convert_image_to_npy(image_dict[modality])[:self.num_slices] for modality in self.modality
+            }
+            # generate a single ndarray
+            image = np.asarray([*image_dict_npy.values()])
+
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)
 

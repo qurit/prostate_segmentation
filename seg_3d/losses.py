@@ -118,7 +118,8 @@ class BCEDiceLoss(nn.Module):
 class BCEDiceWithOverlapLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2), class_weight=None, normalization="sigmoid"):
+    def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2),
+                 class_weight=None, normalization="sigmoid", class_labels=None):
         super(BCEDiceWithOverlapLoss, self).__init__()
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
@@ -126,6 +127,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         self.dice = DiceLoss(normalization=normalization)
         self.overlap_weight = overlap_weight
         self.overlap_idx = overlap_idx  # tuple containing the channel indices of pred, gt for overlap computation
+        self.class_labels = class_labels
         self.logger = logging.getLogger(__name__)
 
         if class_weight is not None:
@@ -150,10 +152,16 @@ class BCEDiceWithOverlapLoss(nn.Module):
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
         # apply per channel weighting to dice
         dice_loss *= self.class_weight.to(dice_loss.device)
-        overlap_loss = self.overlap(input, target)
+        overlap_loss = self.overlap(input, target) if self.overlap_weight > 0 else 0.
 
-        self.logger.info(("BCE: {:.8f} Overlap: {:.8} Dice: " + "{:.4f}, " * target.shape[1])
-                         .format(bce_loss, overlap_loss, *dice_verbose))
+        if self.class_labels is not None:
+            dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
+            dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
+        else:
+            dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
+
+        self.logger.info(("BCE: {:.8f} Overlap: {:.8} Dice: " + "{}" * target.shape[1])
+                         .format(bce_loss, overlap_loss, *dice_log))
 
         return self.bce_weight * bce_loss + self.dice_weight * dice_loss.sum() + self.overlap_weight * overlap_loss
 

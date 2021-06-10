@@ -13,8 +13,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
-from seg_3d.data.image_registration import \
-    read_scan_as_sitk_image, resample_image, convert_image_to_npy, mask_to_sitk_image
+from seg_3d.data.itk_image_resample import read_scan_as_sitk_image, convert_image_to_npy, \
+    mask_to_sitk_image, combine_pet_ct_image, downsample_image, resample_image
 from utils import contour2mask, centre_crop
 
 
@@ -112,13 +112,17 @@ class ImageToImage3D(Dataset):
             evaluates to False, torchvision.transforms.ToTensor will be used on both image and mask.
     """
 
-    def __init__(self, dataset_path: str or List[str], modality: str or List[str], rois: List[str], num_slices: int = None,
-                 slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None, joint_transform: Callable = None,
-                 patient_keys: List[str] = None, num_patients: int = None) -> None:
+    def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
+                 num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
+                 joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None, **kwargs) -> None:
         self.dataset_path = dataset_path
-        self.modality = modality
+        # convert to a simple dict
+        self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
+        self.modality = list(self.modality_roi_map.keys())
+        # useful inverse mapping which maps roi to modality
+        self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
+        self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask array
         self.patient_keys = patient_keys
-        self.rois = rois
         self.num_slices = num_slices
         self.slice_shape = slice_shape
         self.crop_size = crop_size
@@ -127,9 +131,6 @@ class ImageToImage3D(Dataset):
 
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
-
-        if type(modality) is str:
-            self.modality = [modality]
 
         self.dataset_dict = {}
         # handle case if multiple dataset paths passed
@@ -158,7 +159,7 @@ class ImageToImage3D(Dataset):
         }
 
         if joint_transform is None:
-            joint_transform = JointTransform2D(crop=None, p_flip=None, deform_sigma=None, div_by_max=False)
+            joint_transform = JointTransform2D(crop=None, p_flip=0, deform_sigma=None, div_by_max=False)
         self.joint_transform = joint_transform
 
     def __len__(self) -> int:
@@ -176,46 +177,45 @@ class ImageToImage3D(Dataset):
         # get the raw image size for each modality
         raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modality}
 
-        # resample to specified slice shape
-        if len(self.modality) > 1 and self.slice_shape is not None:
-            # NOTE: this part is hardcoded
-            # downsample CT to slice shape
-            image_dict["CT_orig"], image_dict["CT"] = image_dict["CT"], resample_image(image_dict["CT"],
-                                                                                       size=self.slice_shape)
-            # upsample PT to CT
-            image_dict["PT_orig"], image_dict["PT"] = image_dict["PT"], resample_image(image_dict["PT"],
-                                                                                       reference_image=image_dict["CT"])
-
-        # convert to npy and keep only indices from 0:num_slices
-        image_dict_npy = {
-            modality: convert_image_to_npy(image_dict[modality])[:self.num_slices] for modality in self.modality
-        }
-
-        # clip values for CT
-        # TODO: get SUV values from PET
-        if "CT" in self.modality:
-            image_dict_npy["CT"][image_dict_npy["CT"] > 150] = 150
-            image_dict_npy["CT"][image_dict_npy["CT"] < -150] = -150
-
-        # generate single 4D image
-        image = np.asarray([*image_dict_npy.values()])
-        # keep copy of image before further image preprocessing
-        orig_image = np.copy(image)
-
         # read mask data from dataset and return mask dict
-        mask_dict_npy, roi_to_modality_map = self.get_mask(patient, raw_image_size_dict)
+        mask_dict_npy = self.get_mask(patient, raw_image_size_dict)
 
-        # resample mask if necessary
-        if len(self.modality) > 1 and self.slice_shape is not None:
+        # resample to specified slice shape
+        if {*self.modality} == {"PT", "CT"} and self.slice_shape is not None:
+            reference_size = [*self.slice_shape, raw_image_size_dict["CT"][0]]  # assumes PET and CT have same image spacing in z direction
+            image = combine_pet_ct_image(pet_image=image_dict["PT"],
+                                         ct_image=downsample_image(image_dict["CT"], reference_size))
+
             mask_dict = {
-                roi: mask_to_sitk_image(mask_dict_npy[roi], image_dict[roi_to_modality_map[roi] + "_orig"])
+                roi: mask_to_sitk_image(mask_dict_npy[roi], image_dict[self.roi_modality_map[roi]])
                 for roi in mask_dict_npy
             }
 
             for roi in mask_dict:
-                mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image_dict[roi_to_modality_map[roi]])
-                # convert to npy and keep only indices from 0:num_slices
+                mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image)
+                # convert to npy and keep only indices from 0 to num_slices
                 mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])[:self.num_slices]
+
+        # TODO: handle case when not doing multi channel
+        image = np.moveaxis(
+            convert_image_to_npy(image), source=-1, destination=0
+        )[:, :self.num_slices]
+
+        # # convert to npy and keep only indices from 0:num_slices
+        # image_dict_npy = {
+        #     modality: convert_image_to_npy(image_dict[modality])[:self.num_slices] for modality in self.modality
+        # }
+        #
+        # # TODO: clip values for CT
+        # # TODO: get SUV values from PET
+        # if "CT" in self.modality:
+        #     image_dict_npy["CT"][image_dict_npy["CT"] > 150] = 150
+        #     image_dict_npy["CT"][image_dict_npy["CT"] < -150] = -150
+        #
+        # # generate single 4D image
+        # image = np.asarray([*image_dict_npy.values()])
+        # keep copy of image before further image preprocessing
+        orig_image = np.copy(image)
 
         # generate a single ndarray
         masks = np.asarray([*mask_dict_npy.values()])
@@ -238,44 +238,38 @@ class ImageToImage3D(Dataset):
     def get_mask(self, patient, image_size_dict) -> dict:
         # get all rois from the dataset
         patient_rois = {
-            modality: list(self.dataset_dict[patient][modality]['rois'].keys()) for modality in self.modality
+            modality: list(self.dataset_dict[patient][modality]["rois"].keys()) for modality in self.modality
         }
 
-        # get specified roi data from dataset FIXME: assume it doesn't matter which modality roi data is taken from
-        roi_data = OrderedDict()
-        for roi_name in self.rois:
-            # check to see if specified rois exist
-            for i, modality in enumerate(self.modality):
-                if roi_name in patient_rois[modality]:
-                    roi_data[(roi_name, modality)] = self.dataset_dict[patient][modality]['rois'][roi_name]
-                    break
-                # if on last iteration roi_name still not found then print warning
-                elif i == len(self.modality) - 1:
-                    # self.logger.warning("Roi '{}' does not exist in dataset! Ignoring...".format(roi_name))
-                    pass
+        # get specified roi data from dataset
+        roi_data = {}
+        for roi_name, modality in self.roi_modality_map.items():
+            # check to see if specified rois exist in dataset
+            if roi_name in patient_rois[modality]:
+                roi_data[(roi_name, modality)] = self.dataset_dict[patient][modality]["rois"][roi_name]
+            else:
+                # self.logger.warning("Roi '{}' does not exist in dataset! Ignoring...".format(roi_name))
+                pass
 
         # build mask object for each roi
-        mask = OrderedDict({
+        mask = {
             roi_name: np.asarray(
                 [contour2mask(roi_data[(roi_name, modality)][frame], image_size_dict[modality][1:])
                  for frame in range(image_size_dict[modality][0])]
             ) for roi_name, modality in roi_data
-        })  # TODO: add empty mask if specified roi does not exist in dataset
+        }  # TODO: add empty mask if specified roi does not exist in dataset
 
-        if "Tumor" in self.rois:
+        if "Tumor" in self.roi_modality_map:
             # call helper function to process tumor mask
             self.process_tumor_mask(mask)
         else:
             # add logic here for other combinations of rois
             pass
 
-        # return a dict which maps roi to modality
-        # TODO: maybe its better to specify roi to modality map in the config
-        roi_to_modality_map = {
-            roi_name: modality for roi_name, modality in roi_data
-        }
-
-        return mask, roi_to_modality_map
+        # return properly ordered mask based on class labels (while ignoring background)
+        return OrderedDict({
+                roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != "Background"
+        })
 
     def process_tumor_mask(self, mask):
         tumor_keys = [x for x in mask.keys() if "Tumor" in x]
@@ -289,7 +283,7 @@ class ImageToImage3D(Dataset):
 
         tumor_mask[tumor_mask > 1] = 1
 
-        if "Bladder" in self.rois:
+        if "Bladder" in self.roi_modality_map:
             mask["Bladder"][tumor_mask == 1] = 0  # ensure there is no overlap in gt bladder mask
 
         # update tumor mask in the mask dict

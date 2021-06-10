@@ -30,13 +30,13 @@ DATASET:
       - 140
       - 140
     num_slices: 128
-    modality: PT
-    # merges tumor rois Tumor, Tumor2, Tumor3
-    rois:
-    - Bladder
-    - Tumor
-    - Tumor2
-    - Tumor3
+    modality_roi_map:
+      - PT:
+        # merges tumor rois Tumor, Tumor2, Tumor3
+        - Bladder
+        - Tumor
+        - Tumor2
+        - Tumor3
   TRAIN_PATIENT_KEYS: [  # showing 'overlap, tumor sum' next to patient
       'JGH02',
       'JGH05',

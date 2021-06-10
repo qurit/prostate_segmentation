@@ -18,25 +18,25 @@ DATASET:
   VAL_NUM_PATIENTS: 19
   CLASS_LABELS:
     - Background
-    - Prostate
+    - Inter
     - Bladder
     - Tumor
     - TURP urethra
     - R seminal
     - L seminal
   PARAMS:
-    modality:
-    - CT
-    - PT
-    rois:
-    - Inter
-    - Bladder
-    - Tumor
-    - Tumor2
-    - Tumor3
-    - TURP urethra
-    - R seminal
-    - L seminal
+    modality_roi_map:
+      - CT:
+        - Inter
+        - R seminal
+        - L seminal
+      # - Bladder
+      - PT:
+        - TURP urethra
+        - Bladder  # we ensure there is no overlap between gt bladder and tumor so they both need to come from PT
+        - Tumor
+        - Tumor2
+        - Tumor3
     slice_shape: (200, 200)
     crop_size: (128, 128)
     num_slices: 100

@@ -32,6 +32,7 @@ def train(model):
                                    dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                    num_patients=cfg.DATASET.TRAIN_NUM_PATIENTS,
                                    patient_keys=cfg.DATASET.TRAIN_PATIENT_KEYS,
+                                   class_labels=cfg.DATASET.CLASS_LABELS,
                                    **cfg.DATASET.PARAMS)
 
     # if no patient keys specified for val then pass in the patients keys from excluded set in train
@@ -45,6 +46,7 @@ def train(model):
                                  dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                  num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
                                  patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
+                                 class_labels=cfg.DATASET.CLASS_LABELS,
                                  **cfg.DATASET.PARAMS)
 
     assert len(np.intersect1d(train_dataset.patient_keys, val_dataset.patient_keys)) == 0,\

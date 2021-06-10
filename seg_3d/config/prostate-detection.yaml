@@ -17,11 +17,11 @@ DATASET:
   VAL_NUM_PATIENTS: 19
   CLASS_LABELS:
     - Background
-    - Prostate
-  PARAMS:
-    modality: CT
-    rois:
     - Inter
+  PARAMS:
+    modality_roi_map:
+      - CT:
+        - Inter
     crop_size:
       - 200
       - 200

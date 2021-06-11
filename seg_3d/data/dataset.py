@@ -115,7 +115,6 @@ class ImageToImage3D(Dataset):
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
                  joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None, **kwargs) -> None:
-        self.dataset_path = dataset_path
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
@@ -131,8 +130,11 @@ class ImageToImage3D(Dataset):
 
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
+        else:
+            self.dataset_path = dataset_path
 
         self.dataset_dict = {}
+
         # handle case if multiple dataset paths passed
         for dp in self.dataset_path:
             with open(os.path.join(dp, "global_dict.json")) as file_obj:

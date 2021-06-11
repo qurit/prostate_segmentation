@@ -18,7 +18,7 @@ DATASET:
   VAL_NUM_PATIENTS: 19
   CLASS_LABELS:
     - Background
-    - Inter
+    - Inter  # this is the prostate
     - Bladder
     - Tumor
     - TURP urethra

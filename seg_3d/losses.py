@@ -115,6 +115,25 @@ class BCEDiceLoss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
+class WBCEDiceLoss(nn.Module):
+    """Linear combination of BCE and Dice losses"""
+
+    def __init__(self, bce_weight, dice_weight, normalization="sigmoid"):
+        super(WBCEDiceLoss, self).__init__()
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+        self.dice = DiceLoss(normalization=normalization)
+
+    def forward(self, input, target):
+        num_classes = input.size()[1]
+        weights = [target[:, 0, ...].sum() / target[:, x, ...].sum() for x in range(num_classes)]
+        weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).cuda()
+        bce = nn.BCEWithLogitsLoss(pos_weight=weights)
+
+        return self.bce_weight * bce(input, target) + self.dice_weight * self.dice(input, target).sum()
+
+
+@LOSS_REGISTRY.register()
 class BCEDiceWithOverlapLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 

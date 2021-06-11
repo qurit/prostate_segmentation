@@ -1,9 +1,12 @@
 """Original code taken from https://github.com/KeremTurgutlu/dicom-contour"""
 import os
+import cv2
+import scipy
 import pydicom as dicom
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.sparse import csc_matrix
+
+from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
 
 
 def get_smallest_dcm(path, ext='.dcm'):
@@ -41,21 +44,10 @@ def parse_dicom_image(dcm):
     """
     try:
         dcm_image = dcm.pixel_array.astype(np.float)
-        try:
-            intercept = dcm.RescaleIntercept
-        except AttributeError:
-            intercept = 0.0
-        try:
-            slope = dcm.RescaleSlope
-        except AttributeError:
-            slope = 0.0
-
-        if slope != 0.0:
-            dcm_image = dcm_image*slope + intercept
+        dcm_image = apply_modality_lut(dcm_image, dcm)
         return dcm_image
     except dicom.errors.InvalidDicomError:
         return None
-
 
 def coords2poly(contour_dataset, path):
     """
@@ -104,7 +96,7 @@ def poly2contour(contour_data, shape):
     for i, j in list(set(contour_data)):
         rows.append(i)
         cols.append(j)
-    contour_arr = csc_matrix((np.ones_like(rows), (rows, cols)), dtype=np.int8,
+    contour_arr = scipy.sparse.csc_matrix((np.ones_like(rows), (rows, cols)), dtype=np.int8,
                              shape=(shape[0], shape[1])).toarray()
     return contour_arr
 

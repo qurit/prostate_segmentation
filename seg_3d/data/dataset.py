@@ -219,7 +219,7 @@ class ImageToImage3D(Dataset):
         orig_image = np.copy(image)
 
         # generate a single ndarray
-        masks = np.asarray([*mask_dict_npy.values()])
+        masks = np.asarray([*mask_dict_npy.values()])[:, :self.num_slices]
 
         # apply centre crop
         if self.crop_size is not None:

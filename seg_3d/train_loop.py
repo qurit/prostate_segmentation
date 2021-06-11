@@ -106,10 +106,19 @@ def train(model):
 
                 optimizer.zero_grad()
                 training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+
+                # loss can either return a dict of losses or just a single tensor
+                loss_dict = {}
+                if type(training_loss) is dict:
+                    loss_dict = {k: v.item() for k, v in training_loss.items()}
+                    training_loss = sum(training_loss.values())
+
                 training_loss.backward()
                 optimizer.step()
 
-                storage.put_scalars(training_loss=training_loss, lr=optimizer.param_groups[0]["lr"], smoothing_hint=False)
+                storage.put_scalars(training_loss=training_loss,
+                                    lr=optimizer.param_groups[0]["lr"],
+                                    **loss_dict, smoothing_hint=False)
                 scheduler.step()
 
                 # process masks and images to be visualized in tensorboard

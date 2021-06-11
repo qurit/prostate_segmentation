@@ -137,7 +137,7 @@ class WBCEDiceLoss(nn.Module):
 class BCEDiceWithOverlapLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2),
+    def __init__(self, bce_weight, dice_weight, overlap_weight=0, overlap_idx=(1, 2),
                  class_weight=None, normalization="sigmoid", class_labels=None):
         super(BCEDiceWithOverlapLoss, self).__init__()
         self.bce_weight = bce_weight
@@ -171,7 +171,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
         # apply per channel weighting to dice
         dice_loss *= self.class_weight.to(dice_loss.device)
-        overlap_loss = self.overlap(input, target) if self.overlap_weight > 0 else 0.
+        overlap_loss = self.overlap(input, target) if self.overlap_weight > 0 else torch.tensor(0.)
 
         if self.class_labels is not None:
             dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
@@ -182,7 +182,11 @@ class BCEDiceWithOverlapLoss(nn.Module):
         self.logger.info(("BCE: {:.8f} Overlap: {:.8} Dice: " + "{}" * target.shape[1])
                          .format(bce_loss, overlap_loss, *dice_log))
 
-        return self.bce_weight * bce_loss + self.dice_weight * dice_loss.sum() + self.overlap_weight * overlap_loss
+        return {
+            "bce": self.bce_weight * bce_loss,
+            "dice": self.dice_weight * dice_loss.sum(),
+            "overlap": self.overlap_weight * overlap_loss
+        }
 
 
 @LOSS_REGISTRY.register()

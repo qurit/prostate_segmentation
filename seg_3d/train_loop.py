@@ -110,7 +110,7 @@ def train(model):
                 # loss can either return a dict of losses or just a single tensor
                 loss_dict = {}
                 if type(training_loss) is dict:
-                    loss_dict = {k: v.item() for k, v in training_loss.items()}
+                    loss_dict = {"loss/" + k: v.item() for k, v in training_loss.items()}
                     training_loss = sum(training_loss.values())
 
                 training_loss.backward()

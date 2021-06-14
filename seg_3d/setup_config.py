@@ -13,7 +13,7 @@ def setup_config(*args) -> CN:
     cfg.merge_from_list(list(args))
 
     # load params from existing yaml
-    cfg.CONFIG_FILE = "seg_3d/config/bladder-detection.yaml"
+    cfg.CONFIG_FILE = "seg_3d/config/multi-modal-MS-1bg.yaml"
     cfg.merge_from_file(cfg.CONFIG_FILE)
 
     # option to resume training
@@ -27,35 +27,39 @@ def setup_config(*args) -> CN:
 
 
 def add_custom_config(cfg: CN) -> None:
-    cfg.OUTPUT_DIR = "seg_3d/output/test-1"
+    cfg.OUTPUT_DIR = "seg_3d/output/same-no-dice"
+    cfg.DATASET.PARAMS.slice_shape = (256, 256)
+    cfg.DATASET.PARAMS.crop_size = (192, 192)
 
     # dataset and transform
-    cfg.TRANSFORMS.deform_sigma = 5
+    cfg.TRANSFORMS.deform_sigma = False
     cfg.TRANSFORMS.deform_points = (2, 2, 2)
-    cfg.TRANSFORMS.crop = (128, 128)
-    cfg.TRANSFORMS.p_flip = 0.5
+    cfg.TRANSFORMS.crop = None
+    cfg.TRANSFORMS.p_flip = None
 
     # evaluation
     cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "argmax_dice_score", "overlap"]
-    cfg.EARLY_STOPPING.PATIENCE = 40  # set to 0 to disable
-    cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score/Bladder"
+    cfg.TEST.EVAL_PERIOD = 40
+    cfg.EARLY_STOPPING.PATIENCE = 5  # set to 0 to disable
+    cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score/Inter"
     cfg.EARLY_STOPPING.MODE = "max"
 
     # loss
-    cfg.LOSS.FN = "BCEDiceWithOverlapLoss"
-    cfg.LOSS.PARAMS.bce_weight = 0.
-    cfg.LOSS.PARAMS.dice_weight = 1.0
-    cfg.LOSS.PARAMS.overlap_weight = 10.
+    cfg.LOSS.FN = "BCEDiceMSLoss"
+    cfg.LOSS.PARAMS.bce_weight = 1.0
+    cfg.LOSS.PARAMS.dice_weight = 0.
+    cfg.LOSS.PARAMS.ms_weight = 0.5e-14
+    # cfg.LOSS.PARAMS.overlap_weight = 10.
     # tuple containing the channel indices of pred, gt for overlap computation: (pred bladder channel, gt tumor channel)
-    cfg.LOSS.PARAMS.overlap_idx = (1, 2)
-    cfg.LOSS.PARAMS.class_weight = [0, 2, 1]  # background, bladder, tumor weight
+    # cfg.LOSS.PARAMS.overlap_idx = (1, 2)
+    # cfg.LOSS.PARAMS.class_weight = [0, 2, 1]  # background, bladder, tumor weight
 
     # optimizer and lr scheduler
     cfg.SOLVER.PARAMS.lr = 0.0001
-    cfg.SOLVER.IMS_PER_BATCH = 5
-    cfg.SOLVER.MAX_ITER = 1000000
+    cfg.SOLVER.IMS_PER_BATCH = 2
+    cfg.SOLVER.MAX_ITER = 10000
     cfg.SOLVER.CHECKPOINT_PERIOD = 200
-    cfg.SOLVER.STEPS = (240, 480, 700,)
+    cfg.SOLVER.STEPS = (200, 300, 500,)
 
 
 def add_inference_config(cfg: CN) -> None:

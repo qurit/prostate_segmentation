@@ -180,3 +180,63 @@ def classwise_f1_v2(pred, gt):
 
 def get_metrics(config):
     return {metric: METRIC_REGISTRY.get(metric) for metric in config.TEST.EVAL_METRICS}
+
+@METRIC_REGISTRY.register()
+class levelsetLoss(torch.nn.Module):
+    def __init__(self):
+        super(levelsetLoss, self).__init__()
+    
+    def calc_loss(self, channel_output, channel_target):
+        
+        loss = 0.
+        
+        for frame in range(channel_output.shape[1]):
+
+            output = channel_output[:, frame, :, :].unsqueeze(1)
+            target = channel_target[:, frame, :, :].unsqueeze(1)
+            outshape = output.shape
+            tarshape = target.shape
+
+            target_ = torch.unsqueeze(target[:,0], 1)
+            target_ = target_.expand(tarshape[0], outshape[1], tarshape[2], tarshape[3])
+            pcentroid = torch.sum(target_ * output, (2,3))/torch.sum(output, (2,3))
+            pcentroid = pcentroid.view(tarshape[0], outshape[1], 1, 1)
+            plevel = target_ - pcentroid.expand(tarshape[0], outshape[1], tarshape[2], tarshape[3])
+            pLoss = plevel * plevel * output
+            loss += torch.sum(pLoss)
+        
+        return loss
+
+    def forward(self, raw_output, raw_target):
+        # input size = batch x 1 (channel) x height x width
+        loss = 0.0
+
+        for chn_idx, channel in enumerate(range(raw_output.shape[1])):
+            chn_trg_idx = int(chn_idx in [1, 5, 6])
+            
+            bs, chn, fr, h, w = raw_output.shape
+            channel_output = raw_output[:, channel, :, :, :]
+            channel_target = raw_target[:, chn_trg_idx, :, :, :]
+
+            loss += self.calc_loss(channel_output, channel_target)
+
+            if chn_idx == 0:
+                loss += self.calc_loss(channel_output, raw_target[:, 1, :, :, :])
+
+        return loss
+
+@METRIC_REGISTRY.register()
+class gradientLoss2d(torch.nn.Module):
+    def __init__(self, penalty='l2'):
+        super(gradientLoss2d, self).__init__()
+        self.penalty = penalty
+
+    def forward(self, input):
+        dH = torch.abs(input[:, :, :, 1:, :] - input[:, :, :, :-1, :])
+        dW = torch.abs(input[:, :, :, :, 1:] - input[:, :, :, :, :-1])
+        if(self.penalty == "l2"):
+            dH = dH * dH
+            dW = dW * dW
+
+        loss = torch.sum(dH) + torch.sum(dW)
+        return loss

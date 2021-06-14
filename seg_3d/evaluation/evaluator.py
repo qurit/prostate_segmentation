@@ -16,7 +16,7 @@ class Evaluator:
         self.thresholds = thresholds
         self.logger = logging.getLogger(__name__)
 
-    def evaluate(self, model):
+    def evaluate(self, model, unsupervised=False):
         self.logger.info("Starting inference on dataset of size {}...".format(self.dataset.__len__()))
         self.metric_list.reset()
         if self.loss:
@@ -34,7 +34,11 @@ class Evaluator:
                 preds = model(sample).detach()
 
                 if self.loss:
-                    self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
+                    if unsupervised:
+                        loss_labels = (labels, sample)
+                    else:
+                        loss_labels = labels
+                    self.metric_list.results["val_loss"].append(self.loss(preds, loss_labels).item())
 
                 # apply final activation on preds
                 preds = model.final_activation(preds)

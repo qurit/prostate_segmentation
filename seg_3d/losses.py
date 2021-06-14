@@ -115,6 +115,37 @@ class BCEDiceLoss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
+class BCEDiceMSLoss(nn.Module):
+    """Linear combination of BCE and Dice losses"""
+
+    def __init__(self, bce_weight=1, dice_weight=1, ms_weight=1, normalization="sigmoid"):
+        super(BCEDiceMSLoss, self).__init__()
+        self.bce_weight = bce_weight
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([1.,200.,200.,200.,50.,50.,50.]).view(1,7,1,1,1).cuda())
+        self.dice_weight = dice_weight
+        self.dice = DiceLoss(normalization=normalization)
+        self.ms_weight = ms_weight
+
+    def forward(self, input, target):
+        target, orig_img = target
+        loss_LS = metrics.levelsetLoss()
+        loss_G = metrics.gradientLoss2d()
+
+        clamped_input = torch.clamp(input, 1e-10, 1.0)
+
+        loss_A = loss_LS(clamped_input, orig_img)
+        loss_B = loss_G(clamped_input) * 0.001
+        loss_MS = loss_A + loss_B
+        bce_loss = self.bce_weight * self.bce(input, target)
+        dice_loss = self.dice_weight * self.dice(input, target).sum()
+        ms_loss = self.ms_weight * loss_MS
+
+        print('BCE {:.6f} DCS {:.6f} MS {:.6f}'.format(bce_loss.item(), dice_loss.item(), ms_loss.item()))
+        
+        return bce_loss + dice_loss + ms_loss
+
+
+@LOSS_REGISTRY.register()
 class WBCEDiceLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 

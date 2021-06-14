@@ -57,12 +57,21 @@ class JointTransform2D:
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
-        # add channel for background
+        # # add channel for background pet & ct
+        # bg_pt = np.ones_like(masks[1])
+        # bg_ct = np.ones_like(masks[0])
+        # for idx, m in enumerate(masks):
+        #     if idx in [1,2,3]:
+        #         bg_pt[bg_pt == m] = 0
+        #     else:
+        #         bg_ct[bg_ct == m] = 1
+        # masks = [bg_pt, bg_ct, *masks]
+
         bg = np.ones_like(masks[0])
         for m in masks:
             bg[bg == m] = 0
         masks = [bg, *masks]
-
+        
         # transforming to tensor
         image = torch.Tensor(image)
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
@@ -225,7 +234,6 @@ class ImageToImage3D(Dataset):
         if self.crop_size is not None:
             image = centre_crop(image, (*image.shape[:2], *self.crop_size))
             masks = centre_crop(masks, (*masks.shape[:2], *self.crop_size))
-
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, masks)
 
@@ -269,7 +277,7 @@ class ImageToImage3D(Dataset):
 
         # return properly ordered mask based on class labels (while ignoring background)
         return OrderedDict({
-                roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != "Background"
+                roi_name: mask[roi_name] for roi_name in self.class_labels if "Background" not in roi_name
         })
 
     def process_tumor_mask(self, mask):

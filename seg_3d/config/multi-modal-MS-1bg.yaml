@@ -3,7 +3,7 @@ UNSUPERVISED: True
 MODEL:
   UNET:
     in_channels: 2
-    out_channels: 8
+    out_channels: 7
 LOSS:
   FN: BCEDiceMSLoss
   PARAMS:
@@ -18,8 +18,7 @@ DATASET:
   TRAIN_NUM_PATIENTS: 40
   VAL_NUM_PATIENTS: 19
   CLASS_LABELS:
-    - Background_PET
-    - Background_CT
+    - Background
     - Inter  # this is the prostate
     - Bladder
     - Tumor

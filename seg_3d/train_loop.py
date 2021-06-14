@@ -98,14 +98,20 @@ def train(model):
             ):
 
                 storage.step()
-                sample = batched_inputs["image"]
+                sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
 
                 # do a forward pass, input is of shape (N, C, D, H, W)
                 preds = model(sample)
 
                 optimizer.zero_grad()
-                training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+
+                if cfg.UNSUPERVISED:
+                    loss_labels = (labels, sample)
+                else:
+                    loss_labels = labels
+
+                training_loss = loss(preds, loss_labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
 
                 # loss can either return a dict of losses or just a single tensor
                 loss_dict = {}
@@ -132,7 +138,7 @@ def train(model):
 
                 # check if need to run eval step on validation data
                 if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
-                    results = evaluator.evaluate(model)
+                    results = evaluator.evaluate(model, unsupervised=cfg.UNSUPERVISED)
                     storage.put_scalars(**results["metrics"])
 
                     # check early stopping

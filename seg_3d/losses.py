@@ -151,6 +151,8 @@ class BCEDiceWithOverlapLoss(nn.Module):
 
         if class_weight is not None:
             self.class_weight = torch.as_tensor(class_weight, dtype=torch.float)
+            pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1).cuda()
+            self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         else:
             self.class_weight = torch.as_tensor(1)
 

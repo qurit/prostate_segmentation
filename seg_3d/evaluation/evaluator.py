@@ -33,8 +33,10 @@ class Evaluator:
 
                 preds = model(sample).detach()
 
-                if self.loss:
-                    self.metric_list.results["val_loss"].append(self.loss(preds, labels).item())
+                val_loss = self.loss(preds, labels)
+                if type(val_loss) is dict:
+                    val_loss = sum(val_loss.values())
+                self.metric_list.results["val_loss"].append(val_loss.item())
 
                 # apply final activation on preds
                 preds = model.final_activation(preds)

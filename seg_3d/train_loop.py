@@ -126,7 +126,6 @@ def train(model):
                             # add each tag image tuple to tensorboard
                             for item in tags_imgs:
                                 storage.put_image(*item)
->>>>>>> 26ba1bfa31cf21ddc4d3340b8d3d871de94e4fc5
 
                 # loss can either return a dict of losses or just a single tensor
                 loss_dict = {}

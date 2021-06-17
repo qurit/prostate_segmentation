@@ -112,3 +112,4 @@ _C.SEED = 99
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
 _C.UNSUPERVISED = False
+_C.AMP_ENABLED = False  # enables automatic mixed precision training

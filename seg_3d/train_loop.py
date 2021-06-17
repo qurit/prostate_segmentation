@@ -12,6 +12,7 @@ from detectron2.solver import build_lr_scheduler
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from detectron2.utils.file_io import PathManager
 from detectron2.utils.logger import setup_logger
+from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 import seg_3d
@@ -62,7 +63,8 @@ def train(model):
 
     # init eval metrics and evaluator
     metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
-    evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, metric_list=metric_list)
+    evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset,
+                          metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED)
 
     # init checkpointers
     checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
@@ -101,40 +103,50 @@ def train(model):
                 sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
 
-                # do a forward pass, input is of shape (N, C, D, H, W)
-                preds = model(sample)
-
                 optimizer.zero_grad()
 
-                if cfg.UNSUPERVISED:
-                    loss_labels = (labels, sample)
-                else:
-                    loss_labels = labels
+                # runs the forward pass with autocasting if enabled
+                with autocast(enabled=cfg.AMP_ENABLED):
+                    # do a forward pass, input is of shape (N, C, D, H, W)
+                    preds = model(sample)
 
-                training_loss = loss(preds, loss_labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+                    if cfg.UNSUPERVISED:
+                        loss_labels = (labels, sample)
+                    else:
+                        loss_labels = labels
+
+                    training_loss = loss(preds, loss_labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+
+                    # check if need to process masks and images to be visualized in tensorboard
+                    if iteration - start_iter < 5 or (iteration + 1) % 40 == 0:
+                        for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
+                                            [batched_inputs["orig_image"], sample, labels, preds]):
+                            tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
+
+                            # add each tag image tuple to tensorboard
+                            for item in tags_imgs:
+                                storage.put_image(*item)
+>>>>>>> 26ba1bfa31cf21ddc4d3340b8d3d871de94e4fc5
 
                 # loss can either return a dict of losses or just a single tensor
                 loss_dict = {}
                 if type(training_loss) is dict:
-                    loss_dict = {k: v.item() for k, v in training_loss.items()}
+                    loss_dict = {"loss/" + k: v.item() for k, v in training_loss.items()}
                     training_loss = sum(training_loss.values())
 
-                training_loss.backward()
-                optimizer.step()
+                # scales the loss, and calls backward() to create scaled gradients
+                scaler.scale(training_loss).backward()
+
+                # unscales gradients and calls or skips optimizer.step()
+                scaler.step(optimizer)
+
+                # updates the scale for next iteration
+                scaler.update()
 
                 storage.put_scalars(training_loss=training_loss,
                                     lr=optimizer.param_groups[0]["lr"],
                                     **loss_dict, smoothing_hint=False)
                 scheduler.step()
-
-                # process masks and images to be visualized in tensorboard
-                for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
-                                       [batched_inputs["orig_image"], sample, labels, preds]):
-                    tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
-
-                    # add each tag image tuple to tensorboard
-                    for item in tags_imgs:
-                        storage.put_image(*item)
 
                 # check if need to run eval step on validation data
                 if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
@@ -217,6 +229,9 @@ if __name__ == '__main__':
     for params in param_search:
         cfg = setup_config(*params)
         cfg.freeze()
+
+        # setup for automatic mixed precision (AMP) training
+        scaler = GradScaler(enabled=cfg.AMP_ENABLED)
 
         # setup loggers for the various modules
         setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")

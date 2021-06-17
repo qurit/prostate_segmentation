@@ -118,12 +118,19 @@ class BCEDiceLoss(nn.Module):
 class BCEDiceMSLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, bce_weight=1, dice_weight=1, ms_weight=1, normalization="sigmoid"):
+    def __init__(self, bce_weight=1, dice_weight=1, ms_weight=1, normalization="sigmoid", class_weights=None):
+
         super(BCEDiceMSLoss, self).__init__()
+
+        if class_weights is not None:
+            class_weights = torch.Tensor(class_weights).view(1, len(class_weights), 1, 1, 1).cuda()
+
         self.bce_weight = bce_weight
-        self.bce = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([1.,200.,200.,200.,50.,50.,50.]).view(1,7,1,1,1).cuda())
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=class_weights)
+        
         self.dice_weight = dice_weight
         self.dice = DiceLoss(normalization=normalization)
+        
         self.ms_weight = ms_weight
 
     def forward(self, input, target):

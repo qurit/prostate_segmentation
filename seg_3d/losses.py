@@ -181,7 +181,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         else:
             dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
 
-        self.logger.info(("BCE: {:.8f} Overlap: {:.8} Dice: " + "{}" * target.shape[1])
+        self.logger.info(("BCE: {:.8f} Overlap: {:.4f} Dice: " + "{}" * target.shape[1])
                          .format(bce_loss, overlap_loss, *dice_log))
 
         return {

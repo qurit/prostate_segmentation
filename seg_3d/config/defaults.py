@@ -111,3 +111,4 @@ _C.EVAL_ONLY = False  # Option to only run evaluation on data specified by _C.DA
 _C.SEED = 99
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
+_C.AMP_ENABLED = False  # enables automatic mixed precision training

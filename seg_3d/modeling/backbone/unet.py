@@ -1,13 +1,14 @@
 # original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/model.py
 import torch.nn as nn
-from detectron2.modeling.backbone import Backbone
-from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
+from fvcore.common.registry import Registry
 
 from seg_3d.modeling.backbone.buildingblocks import DoubleConv, ExtResNetBlock, create_encoders, create_decoders
 from seg_3d.seg_utils import number_of_features_per_level
 
+BACKBONE_REGISTRY = Registry('BACKBONE')
 
-class Abstract3DUNet(Backbone):
+
+class Abstract3DUNet(nn.Module):
     """
     Base class for standard and residual UNet.
 

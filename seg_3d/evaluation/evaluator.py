@@ -59,9 +59,9 @@ class Evaluator:
                         self.logger.info("{}: {}".format(key, patient_metrics[key]))
 
                     inference_dict[patient] = {"gt": labels.detach().cpu().numpy(),
-                                            "preds": preds.detach().cpu().numpy(),
-                                            "image": data_input["image"].numpy(),
-                                            "metrics": patient_metrics}
+                                               "preds": preds.detach().cpu().numpy(),
+                                               "image": data_input["image"].numpy(),
+                                               "metrics": patient_metrics}
 
         model.train()
         averaged_results = (self.metric_list.get_results(average=True))

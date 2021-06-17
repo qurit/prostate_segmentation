@@ -4,7 +4,7 @@ import torch
 
 from seg_3d.losses import compute_per_channel_dice
 
-from detectron2.utils.registry import Registry
+from fvcore.common.registry import Registry
 from sklearn.metrics import jaccard_score, f1_score
 
 METRIC_REGISTRY = Registry('METRIC')

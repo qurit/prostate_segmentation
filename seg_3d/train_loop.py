@@ -5,13 +5,14 @@ import pickle
 from time import time
 
 import numpy as np
-from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
+# TODO: remove detectron2 dependence
 from detectron2.data.samplers import TrainingSampler
-from detectron2.modeling import build_model
 from detectron2.solver import build_lr_scheduler
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
-from detectron2.utils.file_io import PathManager
 from detectron2.utils.logger import setup_logger
+
+from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
+from fvcore.common.file_io import PathManager
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
@@ -20,6 +21,7 @@ from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
+from seg_3d.modeling.meta_arch.segnet import build_model
 from seg_3d.seg_utils import EarlyStopping, seed_all, DefaultTensorboardFormatter
 from seg_3d.setup_config import setup_config
 
@@ -67,7 +69,7 @@ def train(model):
                           metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED)
 
     # init checkpointers
-    checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
+    checkpointer = Checkpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
     start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=cfg.RESUME).get("iteration", -1) + 1)
     max_iter = cfg.SOLVER.MAX_ITER
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
@@ -111,10 +113,11 @@ def train(model):
                     preds = model(sample)
                     training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
 
+                    # FIXME: autocast
                     # check if need to process masks and images to be visualized in tensorboard
                     if iteration - start_iter < 5 or (iteration + 1) % 40 == 0:
                         for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
-                                            [batched_inputs["orig_image"], sample, labels, preds]):
+                                               [batched_inputs["orig_image"], sample, labels, preds]):
                             tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
 
                             # add each tag image tuple to tensorboard
@@ -191,7 +194,7 @@ def run():
 
     if cfg.EVAL_ONLY:
         logger.info("Running evaluation only!")
-        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
+        Checkpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
 
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,

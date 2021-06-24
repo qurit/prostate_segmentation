@@ -69,11 +69,9 @@ _C.SOLVER.IMS_PER_BATCH = 1
 _C.SOLVER.MAX_ITER = 10000
 _C.SOLVER.CHECKPOINT_PERIOD = 1000  # Save a checkpoint after every this number of iterations
 
-# lr scheduler params, see detectron2/solver/build.py for LR scheduler options
-_C.SOLVER.LR_SCHEDULER_NAME = "WarmupMultiStepLR"
+# lr scheduler params
 _C.SOLVER.GAMMA = 0.1
 _C.SOLVER.STEPS = (500,)  # The iteration number to decrease learning rate by GAMMA
-_C.SOLVER.WARMUP_METHOD = "linear"
 _C.SOLVER.WARMUP_FACTOR = 1.0 / 1000
 _C.SOLVER.WARMUP_ITERS = 0  # Number of iterations to increase lr to base lr
 

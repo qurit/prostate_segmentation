@@ -7,8 +7,7 @@ from torch import nn as nn
 from torch.autograd import Variable
 from fvcore.common.registry import Registry
 
-from seg_3d.seg_utils import expand_as_one_hot
-from seg_3d.evaluation import metrics
+from seg_3d.utils.seg_utils import expand_as_one_hot
 
 LOSS_REGISTRY = Registry('LOSS')
 
@@ -127,7 +126,7 @@ class WBCEDiceLoss(nn.Module):
     def forward(self, input, target):
         num_classes = input.size()[1]
         weights = [target[:, 0, ...].sum() / target[:, x, ...].sum() for x in range(num_classes)]
-        weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).cuda()
+        weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).to(input.device)
         bce = nn.BCEWithLogitsLoss(pos_weight=weights)
 
         return self.bce_weight * bce(input, target) + self.dice_weight * self.dice(input, target).sum()
@@ -151,12 +150,12 @@ class BCEDiceWithOverlapLoss(nn.Module):
 
         if class_weight is not None:
             self.class_weight = torch.as_tensor(class_weight, dtype=torch.float)
-            pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1).cuda()
+            pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1)
             self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         else:
             self.class_weight = torch.as_tensor(1)
 
-    def overlap(self, pred, gt):
+    def overlap(self, pred, gt) -> torch.Tensor:
         # get the right channels from pred and gt tensors
         pred = pred[:, self.overlap_idx[0], ...]
         gt = gt[:, self.overlap_idx[1], ...]
@@ -164,15 +163,21 @@ class BCEDiceWithOverlapLoss(nn.Module):
         if gt.sum() != 0:
             return (nn.Softmax(dim=1)(pred) * gt).sum() / gt.sum()
 
-        return 0.
+        return torch.tensor(0.)
 
     def forward(self, input, target):
-        bce_loss = self.bce(input, target)
+        # dice
         dice_loss = self.dice(input, target)
         # get raw dice scores
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
         # apply per channel weighting to dice
-        dice_loss *= self.class_weight.to(dice_loss.device)
+        dice_loss *= self.class_weight.to(input.device)
+
+        # bce
+        self.bce.to(input.device)
+        bce_loss = self.bce(input, target)
+
+        # overlap
         overlap_loss = self.overlap(input, target) if self.overlap_weight > 0 else torch.tensor(0.)
 
         if self.class_labels is not None:

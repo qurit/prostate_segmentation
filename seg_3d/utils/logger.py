@@ -6,8 +6,10 @@ import logging
 import os
 import sys
 
-from fvcore.common.file_io import PathManager
+from iopath import PathManager
 from termcolor import colored
+
+PathManager = PathManager()
 
 
 class _ColorfulFormatter(logging.Formatter):

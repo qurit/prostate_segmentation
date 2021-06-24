@@ -8,11 +8,12 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Optional
+
 import torch
 from fvcore.common.history_buffer import HistoryBuffer
+from iopath import PathManager
 
-from fvcore.common.file_io import PathManager
-
+PathManager = PathManager()
 _CURRENT_STORAGE_STACK = []
 
 

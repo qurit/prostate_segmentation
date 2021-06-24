@@ -6,7 +6,7 @@ from time import time
 
 import numpy as np
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
-from fvcore.common.file_io import PathManager
+from iopath import PathManager
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
@@ -16,13 +16,13 @@ from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
 from seg_3d.modeling.meta_arch.segnet import build_model
-from seg_3d.utils.seg_utils import seed_all, TrainingSampler
-from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
-from seg_3d.utils.early_stopping import EarlyStopping
-from seg_3d.utils.scheduler import build_lr_scheduler
 from seg_3d.setup_config import setup_config
+from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger
+from seg_3d.utils.scheduler import build_lr_scheduler
+from seg_3d.utils.seg_utils import seed_all, TrainingSampler
+from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
 
 def train(model):
@@ -176,7 +176,7 @@ def train(model):
 
 def run():
     path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
-    with PathManager.open(path, "w") as f:
+    with PathManager().open(path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(path))
 

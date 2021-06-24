@@ -1,6 +1,7 @@
 cudatoolkit
 elasticdeform
 fvcore
+iopath
 matplotlib
 numpy
 opencv-python

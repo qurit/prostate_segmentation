@@ -40,6 +40,10 @@ def find_maximum_patch_size(model, device):
         model(patch)
 
 
+def number_of_features_per_level(init_channel_number, num_levels):
+    return [init_channel_number * 2 ** k for k in range(num_levels)]
+
+
 def expand_as_one_hot(input, C, ignore_index=None):
     """
     Converts NxSPATIAL label image to NxCxSPATIAL, where each label gets converted to its corresponding one-hot vector.

@@ -1,0 +1,17 @@
+cudatoolkit
+elasticdeform
+fvcore
+matplotlib
+numpy
+opencv-python
+pandas
+pydicom
+pytorch
+scikit-image
+scikit-learn
+scipy
+SimpleITK
+tensorboard
+torchaudio
+torchvision
+tqdm

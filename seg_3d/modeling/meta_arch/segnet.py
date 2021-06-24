@@ -1,12 +1,12 @@
+import torch
 import torch.nn as nn
+from fvcore.common.registry import Registry
 
-from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
-from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
+from seg_3d.modeling.backbone.unet import BACKBONE_REGISTRY
+
+META_ARCH_REGISTRY = Registry('META_ARCH')
 
 
-# TODO:
-# - semantic segmentation head
-# - preprocessing
 @META_ARCH_REGISTRY.register()
 class SemanticSegNet(nn.Module):
 
@@ -23,3 +23,8 @@ class SemanticSegNet(nn.Module):
     def forward(self, x):
         images = x.to(self.device)
         return self.backbone(images)
+
+
+def build_model(cfg):
+    model = META_ARCH_REGISTRY.get(cfg.MODEL.META_ARCHITECTURE)(cfg)
+    return model.to(torch.device(cfg.MODEL.DEVICE))

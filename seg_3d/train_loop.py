@@ -5,13 +5,15 @@ import pickle
 from time import time
 
 import numpy as np
-from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
+# TODO: remove detectron2 dependence
 from detectron2.data.samplers import TrainingSampler
-from detectron2.modeling import build_model
 from detectron2.solver import build_lr_scheduler
 from detectron2.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
-from detectron2.utils.file_io import PathManager
 from detectron2.utils.logger import setup_logger
+
+from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
+from fvcore.common.file_io import PathManager
+from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 import seg_3d
@@ -19,6 +21,7 @@ from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
+from seg_3d.modeling.meta_arch.segnet import build_model
 from seg_3d.seg_utils import EarlyStopping, seed_all, DefaultTensorboardFormatter
 from seg_3d.setup_config import setup_config
 
@@ -32,6 +35,7 @@ def train(model):
                                    dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                    num_patients=cfg.DATASET.TRAIN_NUM_PATIENTS,
                                    patient_keys=cfg.DATASET.TRAIN_PATIENT_KEYS,
+                                   class_labels=cfg.DATASET.CLASS_LABELS,
                                    **cfg.DATASET.PARAMS)
 
     # if no patient keys specified for val then pass in the patients keys from excluded set in train
@@ -45,6 +49,7 @@ def train(model):
                                  dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                  num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
                                  patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
+                                 class_labels=cfg.DATASET.CLASS_LABELS,
                                  **cfg.DATASET.PARAMS)
 
     assert len(np.intersect1d(train_dataset.patient_keys, val_dataset.patient_keys)) == 0,\
@@ -60,10 +65,11 @@ def train(model):
 
     # init eval metrics and evaluator
     metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
-    evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, metric_list=metric_list)
+    evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset,
+                          metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED)
 
     # init checkpointers
-    checkpointer = DetectionCheckpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
+    checkpointer = Checkpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
     start_iter = (checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=cfg.RESUME).get("iteration", -1) + 1)
     max_iter = cfg.SOLVER.MAX_ITER
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
@@ -97,27 +103,46 @@ def train(model):
 
                 storage.step()
                 sample = batched_inputs["image"]
-                labels = batched_inputs["gt_mask"].squeeze(1).to(cfg.MODEL.DEVICE)
-
-                # do a forward pass, input is of shape (N, C, D, H, W)
-                preds = model(sample).squeeze(1)
+                labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
 
                 optimizer.zero_grad()
-                training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
-                training_loss.backward()
-                optimizer.step()
 
-                storage.put_scalars(training_loss=training_loss, lr=optimizer.param_groups[0]["lr"], smoothing_hint=False)
+                # runs the forward pass with autocasting if enabled
+                with autocast(enabled=cfg.AMP_ENABLED):
+                    # do a forward pass, input is of shape (N, C, D, H, W)
+                    preds = model(sample)
+                    training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+
+                    # FIXME: autocast
+                    # check if need to process masks and images to be visualized in tensorboard
+                    if iteration - start_iter < 5 or (iteration + 1) % 40 == 0:
+                        for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
+                                               [batched_inputs["orig_image"], sample, labels, preds]):
+                            tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
+
+                            # add each tag image tuple to tensorboard
+                            for item in tags_imgs:
+                                storage.put_image(*item)
+
+                # loss can either return a dict of losses or just a single tensor
+                loss_dict = {}
+                if type(training_loss) is dict:
+                    loss_dict = {"loss/" + k: v.item() for k, v in training_loss.items()}
+                    training_loss = sum(training_loss.values())
+
+                # scales the loss, and calls backward() to create scaled gradients
+                scaler.scale(training_loss).backward()
+
+                # unscales gradients and calls or skips optimizer.step()
+                scaler.step(optimizer)
+
+                # updates the scale for next iteration
+                scaler.update()
+
+                storage.put_scalars(training_loss=training_loss,
+                                    lr=optimizer.param_groups[0]["lr"],
+                                    **loss_dict, smoothing_hint=False)
                 scheduler.step()
-
-                # process masks and images to be visualized in tensorboard
-                for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
-                                       [batched_inputs["orig_image"], sample, labels, preds]):
-                    tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
-
-                    # add each tag image tuple to tensorboard
-                    for item in tags_imgs:
-                        storage.put_image(*item)
 
                 # check if need to run eval step on validation data
                 if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
@@ -169,7 +194,7 @@ def run():
 
     if cfg.EVAL_ONLY:
         logger.info("Running evaluation only!")
-        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
+        Checkpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
 
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
@@ -200,6 +225,9 @@ if __name__ == '__main__':
     for params in param_search:
         cfg = setup_config(*params)
         cfg.freeze()
+
+        # setup for automatic mixed precision (AMP) training
+        scaler = GradScaler(enabled=cfg.AMP_ENABLED)
 
         # setup loggers for the various modules
         setup_logger(output=cfg.OUTPUT_DIR, name="detectron2")

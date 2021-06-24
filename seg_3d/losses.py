@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn as nn
 from torch.autograd import Variable
-from detectron2.utils.registry import Registry
+from fvcore.common.registry import Registry
 
 from seg_3d.seg_utils import expand_as_one_hot
 from seg_3d.evaluation import metrics
@@ -115,10 +115,30 @@ class BCEDiceLoss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
+class WBCEDiceLoss(nn.Module):
+    """Linear combination of BCE and Dice losses"""
+
+    def __init__(self, bce_weight, dice_weight, normalization="sigmoid"):
+        super(WBCEDiceLoss, self).__init__()
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+        self.dice = DiceLoss(normalization=normalization)
+
+    def forward(self, input, target):
+        num_classes = input.size()[1]
+        weights = [target[:, 0, ...].sum() / target[:, x, ...].sum() for x in range(num_classes)]
+        weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).cuda()
+        bce = nn.BCEWithLogitsLoss(pos_weight=weights)
+
+        return self.bce_weight * bce(input, target) + self.dice_weight * self.dice(input, target).sum()
+
+
+@LOSS_REGISTRY.register()
 class BCEDiceWithOverlapLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2), class_weight=None, normalization="sigmoid"):
+    def __init__(self, bce_weight, dice_weight, overlap_weight=0, overlap_idx=(1, 2),
+                 class_weight=None, normalization="sigmoid", class_labels=None):
         super(BCEDiceWithOverlapLoss, self).__init__()
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
@@ -126,10 +146,13 @@ class BCEDiceWithOverlapLoss(nn.Module):
         self.dice = DiceLoss(normalization=normalization)
         self.overlap_weight = overlap_weight
         self.overlap_idx = overlap_idx  # tuple containing the channel indices of pred, gt for overlap computation
+        self.class_labels = class_labels
         self.logger = logging.getLogger(__name__)
 
         if class_weight is not None:
             self.class_weight = torch.as_tensor(class_weight, dtype=torch.float)
+            pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1).cuda()
+            self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         else:
             self.class_weight = torch.as_tensor(1)
 
@@ -150,12 +173,22 @@ class BCEDiceWithOverlapLoss(nn.Module):
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
         # apply per channel weighting to dice
         dice_loss *= self.class_weight.to(dice_loss.device)
-        overlap_loss = self.overlap(input, target)
+        overlap_loss = self.overlap(input, target) if self.overlap_weight > 0 else torch.tensor(0.)
 
-        self.logger.info(("BCE: {:.8f} Overlap: {:.8} Dice: " + "{:.4f}, " * target.shape[1])
-                         .format(bce_loss, overlap_loss, *dice_verbose))
+        if self.class_labels is not None:
+            dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
+            dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
+        else:
+            dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
 
-        return self.bce_weight * bce_loss + self.dice_weight * dice_loss.sum() + self.overlap_weight * overlap_loss
+        self.logger.info(("BCE: {:.8f} Overlap: {:.4f} Dice: " + "{}" * target.shape[1])
+                         .format(bce_loss, overlap_loss, *dice_log))
+
+        return {
+            "bce": self.bce_weight * bce_loss,
+            "dice": self.dice_weight * dice_loss.sum(),
+            "overlap": self.overlap_weight * overlap_loss
+        }
 
 
 @LOSS_REGISTRY.register()

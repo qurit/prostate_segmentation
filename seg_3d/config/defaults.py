@@ -2,6 +2,8 @@ from fvcore.common.config import CfgNode as CN
 
 _C = CN()
 
+# CfgNodes can only contain a limited set of valid types
+# _VALID_TYPES = {tuple, list, str, int, float, bool, type(None)}
 # -----------------------------------------------------------------------------
 # MODEL
 # -----------------------------------------------------------------------------
@@ -31,8 +33,7 @@ _C.DATASET.TRAIN_PATIENT_KEYS = None
 _C.DATASET.VAL_PATIENT_KEYS = None
 _C.DATASET.TEST_PATIENT_KEYS = None
 
-_C.DATASET.PARAMS.modality = "PT"
-_C.DATASET.PARAMS.rois = ["Bladder"]
+_C.DATASET.PARAMS.modality_roi_map = [{"CT": ["Bladder"]}]
 _C.DATASET.PARAMS.num_slices = None  # number of slices in axial plane, if None then selects shortest scan length from dataset
 _C.DATASET.PARAMS.crop_size = None  # size of centre crop, if None then no centre cropping done
 
@@ -110,3 +111,4 @@ _C.EVAL_ONLY = False  # Option to only run evaluation on data specified by _C.DA
 _C.SEED = 99
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
+_C.AMP_ENABLED = False  # enables automatic mixed precision training

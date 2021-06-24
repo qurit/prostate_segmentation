@@ -77,4 +77,4 @@ class DefaultTensorboardFormatter(_TensorboardFormatter):
 
     @staticmethod
     def _normalize_img(img):
-        return np.nan_to_num((img - img.min()) / np.ptp(img))
+        return np.nan_to_num((img - img.float().min()) / np.ptp(img))

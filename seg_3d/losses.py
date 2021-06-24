@@ -174,7 +174,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         dice_loss *= self.class_weight.to(input.device)
 
         # bce
-        self.bce.pos_weight.to(input.device)
+        self.bce.to(input.device)
         bce_loss = self.bce(input, target)
 
         # overlap

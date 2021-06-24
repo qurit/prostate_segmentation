@@ -112,7 +112,6 @@ def train(model):
                     preds = model(sample)
                     training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
 
-                    # FIXME: autocast
                     # check if need to process masks and images to be visualized in tensorboard
                     if iteration - start_iter < 5 or (iteration + 1) % 40 == 0:
                         for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],

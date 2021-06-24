@@ -250,8 +250,8 @@ class ImageToImage3D(Dataset):
                 roi_data[(roi_name, modality)] = self.dataset_dict[patient][modality]["rois"][roi_name]
             else:
                 # add empty mask if specified roi does not exist in dataset
-                self.logger.warning("Roi '{}' does not exist in dataset for patient '{}'! Adding empty mask..."
-                                    .format(roi_name, patient))
+                # self.logger.warning("Roi '{}' does not exist in dataset for patient '{}'! Adding empty mask..."
+                #                    .format(roi_name, patient))
                 # creates an empty list of contours for each frame
                 roi_data[(roi_name, modality)] = [[] for _ in range(image_size_dict[modality][0])]
 

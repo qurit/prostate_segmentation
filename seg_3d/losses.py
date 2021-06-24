@@ -7,8 +7,7 @@ from torch import nn as nn
 from torch.autograd import Variable
 from fvcore.common.registry import Registry
 
-from seg_3d.seg_utils import expand_as_one_hot
-from seg_3d.evaluation import metrics
+from seg_3d.utils.seg_utils import expand_as_one_hot
 
 LOSS_REGISTRY = Registry('LOSS')
 

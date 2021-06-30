@@ -38,10 +38,11 @@ class Evaluator:
                 with autocast(enabled=self.amp_enabled):
                     preds = model(sample).detach()
 
-                    val_loss = self.loss(preds, labels)
-                    if type(val_loss) is dict:
-                        val_loss = sum(val_loss.values())
-                    self.metric_list.results["val_loss"].append(val_loss.item())
+                    if self.loss is not None:
+                        val_loss = self.loss(preds, labels)
+                        if type(val_loss) is dict:
+                            val_loss = sum(val_loss.values())
+                        self.metric_list.results["val_loss"].append(val_loss.item())
 
                     # apply final activation on preds
                     preds = model.final_activation(preds)

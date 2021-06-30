@@ -156,12 +156,13 @@ class BCEDiceWithOverlapLoss(nn.Module):
             self.class_weight = torch.as_tensor(1)
 
     def overlap(self, pred, gt) -> torch.Tensor:
+        pred = nn.Softmax(dim=1)(pred)
         # get the right channels from pred and gt tensors
         pred = pred[:, self.overlap_idx[0], ...]
         gt = gt[:, self.overlap_idx[1], ...]
 
         if gt.sum() != 0:
-            return (nn.Softmax(dim=1)(pred) * gt).sum() / gt.sum()
+            return (pred * gt).sum() / gt.sum()
 
         return torch.tensor(0.)
 

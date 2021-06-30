@@ -197,6 +197,7 @@ def run():
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
                                       patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
+                                      class_labels=cfg.DATASET.CLASS_LABELS,
                                       **cfg.DATASET.PARAMS)
 
         # init eval metrics and evaluator

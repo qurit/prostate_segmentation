@@ -1,11 +1,11 @@
 # original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/metrics.py
 import numpy as np
 import torch
-
-from seg_3d.losses import compute_per_channel_dice
-
 from fvcore.common.registry import Registry
 from sklearn.metrics import jaccard_score, f1_score
+from skimage.metrics import structural_similarity, hausdorff_distance
+
+from seg_3d.losses import compute_per_channel_dice
 
 METRIC_REGISTRY = Registry('METRIC')
 EPSILON = 1e-32
@@ -47,6 +47,22 @@ class MetricList:
                 averaged_results[key] = value
 
         return averaged_results
+
+
+@METRIC_REGISTRY.register()
+def ssim(pred, gt):
+    return [
+        structural_similarity(im1, im2)
+        for im1, im2 in zip(pred.squeeze().cpu().numpy(), gt.squeeze().cpu().numpy())
+    ]
+
+
+@METRIC_REGISTRY.register()
+def hausdorff(pred, gt):
+    return [
+        hausdorff_distance(im1, im2)
+        for im1, im2 in zip(pred.squeeze().cpu().numpy(), gt.squeeze().cpu().numpy())
+    ]
 
 
 @METRIC_REGISTRY.register()

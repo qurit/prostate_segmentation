@@ -7,9 +7,11 @@ import torch
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 
+from seg_3d.evaluation.metrics import MetricList
+
 
 class Evaluator:
-    def __init__(self, device, dataset, metric_list, loss: Callable = None,
+    def __init__(self, device, dataset, metric_list: MetricList, loss: Callable = None,
                  thresholds: List[float] = None, amp_enabled: bool = False):
         self.device = device
         self.dataset = dataset
@@ -49,8 +51,7 @@ class Evaluator:
 
                     # apply thresholding if it is specified
                     if self.thresholds is not None:
-                        preds = self.threshold_predictions(preds)
-
+                        preds[:] = self.threshold_predictions(preds.squeeze(1))
                     self.metric_list(preds, labels)
 
                     # print out results for patient
@@ -78,5 +79,12 @@ class Evaluator:
             }
         }
 
-    def threshold_predictions(self, preds):
-        return NotImplementedError  # TODO
+    def threshold_predictions(self, preds: torch.Tensor) -> torch.Tensor:
+        # below approach only translates well to binary tasks
+        # TODO: improve for multi class case
+        new_preds = [
+            torch.where(pred >= thres, pred, torch.zeros_like(pred))
+            for thres, pred in zip(self.thresholds, preds)
+        ]
+
+        return torch.stack(new_preds)

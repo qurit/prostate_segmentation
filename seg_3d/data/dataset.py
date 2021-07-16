@@ -115,7 +115,7 @@ class ImageToImage3D(Dataset):
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
                  joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None,
-                 patch_wise: Tuple[int, int] = (1, 1), **kwargs) -> None:
+                 patch_wise: Tuple[int, int, int] = (1, 1, 1), **kwargs) -> None:
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
@@ -127,7 +127,7 @@ class ImageToImage3D(Dataset):
         self.slice_shape = slice_shape
         self.crop_size = crop_size
         self.num_patients = num_patients  # used for train-val-test split
-        self.patch_wise = patch_wise  # non-overlapping patch-wise training which ignores depth axis
+        self.patch_wise = patch_wise  # non-overlapping patch-wise training, number of patches in each dim (x, y, z)
         self.logger = logging.getLogger(__name__)
 
         if type(dataset_path) is str:
@@ -182,6 +182,14 @@ class ImageToImage3D(Dataset):
         # get the raw image size for each modality
         raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modality}
 
+        # get the range of slices
+        if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:
+            patch_idx = idx % self.patch_wise[2]
+            size = raw_image_size_dict[self.modality[0]][0] // self.patch_wise[2]  # assumes scans have same number of slices across modalities
+            slice_range = slice(patch_idx * size, (patch_idx + 1) * size)
+        else:
+            slice_range = slice(0, self.num_slices)
+
         # TODO: get SUV values from PET
         if "CT" in self.modality:
             image_dict["CT"] = clamp_image_values(image=image_dict["CT"], lower_bound=-150, upper_bound=150)
@@ -203,17 +211,17 @@ class ImageToImage3D(Dataset):
             for roi in mask_dict:
                 mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image)
                 # convert to npy and keep specified slices
-                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])[:self.num_slices]
+                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])[slice_range]
 
             # convert image to npy, keep specified slices, and set channels as first dimension
             image = np.moveaxis(
                 convert_image_to_npy(image), source=-1, destination=0
-            )[:, :self.num_slices]
+            )[:, slice_range]
 
         else:
             # convert to npy and keep specified slices
             image_dict_npy = {
-                modality: convert_image_to_npy(image_dict[modality])[:self.num_slices] for modality in self.modality
+                modality: convert_image_to_npy(image_dict[modality])[slice_range] for modality in self.modality
             }
             # generate a single ndarray
             image = np.asarray([*image_dict_npy.values()])
@@ -222,7 +230,7 @@ class ImageToImage3D(Dataset):
         orig_image = np.copy(image)
 
         # generate a single ndarray
-        mask = np.asarray([*mask_dict_npy.values()])[:, :self.num_slices]
+        mask = np.asarray([*mask_dict_npy.values()])[:, slice_range]
 
         # apply centre crop
         if self.crop_size is not None:
@@ -243,13 +251,13 @@ class ImageToImage3D(Dataset):
         }
 
     def get_patch(self, idx: int, image: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        if self.patch_wise == (1, 1):  # do nothing if patch size is 1x1
+        if np.prod(self.patch_wise[:2]) == 1:  # do nothing if patch size is 1x1
             return image, mask
 
         # find the patch, indices for a 2x2 grid go like [0, 1; 2, 3]
-        patch_idx = idx % np.prod(self.patch_wise)
+        patch_idx = idx % np.prod(self.patch_wise[:2])
         # compute dimensions of patch
-        m, n = (image.shape[2:] / np.asarray(self.patch_wise)).astype(int)
+        m, n = (image.shape[2:] / np.asarray(self.patch_wise[:2])).astype(int)
         # find the row and column of the patch
         r, c = patch_idx // self.patch_wise[0], patch_idx % self.patch_wise[1]
         # handle case if patch size is a single column or row

@@ -22,7 +22,7 @@ class Evaluator:
         self.logger = logging.getLogger(__name__)
 
     def evaluate(self, model):
-        self.logger.info("Starting inference on dataset of size {}...".format(self.dataset.__len__()))
+        self.logger.info("Starting evaluation on dataset of size {}...".format(self.dataset.__len__()))
         self.metric_list.reset()
         if self.loss:
             self.metric_list.results["val_loss"] = []  # add an entry for val loss
@@ -52,6 +52,7 @@ class Evaluator:
                     # apply thresholding if it is specified
                     if self.thresholds is not None:
                         preds[:] = self.threshold_predictions(preds.squeeze(1))
+
                     self.metric_list(preds, labels)
 
                     # print out results for patient
@@ -60,8 +61,8 @@ class Evaluator:
                     for key in patient_metrics:
                         self.logger.info("{}: {}".format(key, patient_metrics[key]))
 
-                    inference_dict[patient] = {"gt": labels.detach().cpu().numpy(),
-                                               "preds": preds.detach().cpu().numpy(),
+                    inference_dict[patient] = {"gt": labels.cpu().numpy(),
+                                               "preds": preds.cpu().numpy(),
                                                "image": data_input["image"].numpy(),
                                                "metrics": patient_metrics}
 

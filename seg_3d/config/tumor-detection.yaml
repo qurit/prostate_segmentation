@@ -1,0 +1,35 @@
+_BASE_: Base-3D-UNet.yaml
+MODEL:
+  UNET:
+    out_channels: 2  # channels are background, tumor
+LOSS:
+  FN: BCEDiceWithOverlapLoss
+  PARAMS:
+    bce_weight: 1.
+    dice_weight: 1.
+    overlap_weight: 0.
+    class_weight: [0, 1]  # set weight for background to 0
+    normalization: sigmoid
+TRANSFORMS:
+  div_by_max: True
+DATASET:
+  TRAIN_DATASET_PATH:
+  - data/image_dataset
+  TEST_DATASET_PATH:
+  - data/image_dataset
+  CLASS_LABELS:
+    - Background
+    - Tumor
+  PARAMS:
+    crop_size:
+      - 140
+      - 140
+    num_slices: 128
+    modality_roi_map:
+      - PT:
+        # merges tumor rois Tumor, Tumor2, Tumor3
+        - Tumor
+        - Tumor2
+        - Tumor3
+  TRAIN_NUM_PATIENTS: 40
+  VAL_NUM_PATIENTS: 19

@@ -11,7 +11,7 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 import seg_3d
-from seg_3d.data.dataset import ImageToImage3D, JointTransform2D
+from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
@@ -29,7 +29,7 @@ def train(model):
     model.train()
 
     # get training and validation datasets
-    train_transforms = JointTransform2D(test=False, **cfg.TRANSFORMS)
+    train_transforms = JointTransform3D(test=False, **cfg.TRANSFORMS)
     train_dataset = ImageToImage3D(joint_transform=train_transforms,
                                    dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                    num_patients=cfg.DATASET.TRAIN_NUM_PATIENTS,
@@ -43,7 +43,7 @@ def train(model):
         cfg.DATASET.VAL_PATIENT_KEYS = train_dataset.excluded_patients
         cfg.freeze()
 
-    val_transforms = JointTransform2D(test=True, **cfg.TRANSFORMS)
+    val_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
     val_dataset = ImageToImage3D(joint_transform=val_transforms,
                                  dataset_path=cfg.DATASET.TRAIN_DATASET_PATH,
                                  num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
@@ -85,7 +85,7 @@ def train(model):
     early_stopping = EarlyStopping(monitor=cfg.EARLY_STOPPING.MONITOR,
                                    patience=cfg.EARLY_STOPPING.PATIENCE,
                                    mode=cfg.EARLY_STOPPING.MODE)
-    early_stopping.check_is_valid(metric_list, cfg.DATASET.CLASS_LABELS)
+    early_stopping.check_is_valid(list(metric_list.metrics.keys()), cfg.DATASET.CLASS_LABELS)
 
     # measuring the time elapsed
     train_start = time()
@@ -210,6 +210,19 @@ def run():
         with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
             pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
         return
+
+    elif cfg.PRED_ONLY:  # TODO
+        logger.info("Running inference only!")
+        Checkpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
+
+        # get dataset for inference
+        test_dataset = Image3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH)
+
+        # get predictions
+
+        # save results
+
+        return NotImplementedError
 
     return train(model)
 

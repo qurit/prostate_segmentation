@@ -102,6 +102,7 @@ _C.TEST.THRESHOLDS = None
 # weights from .pth file specified in checkpoint file inside _C.OUTPUT_DIR
 _C.RESUME = False
 _C.EVAL_ONLY = False  # Option to only run evaluation on data specified by _C.DATASET.TEST_DATASET_PATH
+_C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DATASET.TEST_DATASET_PATH
 
 # -----------------------------------------------------------------------------
 # MISC

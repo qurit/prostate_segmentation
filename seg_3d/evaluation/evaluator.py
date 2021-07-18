@@ -1,28 +1,31 @@
 import json
 import logging
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
+import numpy as np
 import tqdm
 import torch
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 
+from seg_3d.data.dataset import ImageToImage3D
 from seg_3d.evaluation.metrics import MetricList
 
 
 class Evaluator:
-    def __init__(self, device, dataset, metric_list: MetricList, loss: Callable = None,
-                 thresholds: List[float] = None, amp_enabled: bool = False):
+    def __init__(self, device: str, dataset: ImageToImage3D, metric_list: MetricList, loss: Callable = None,
+                 thresholds: List[float] = None, amp_enabled: bool = False, patch_wise: Tuple[int] = None):
         self.device = device
         self.dataset = dataset
         self.metric_list = metric_list
         self.loss = loss
         self.thresholds = thresholds
         self.amp_enabled = amp_enabled
+        self.patch_wise = patch_wise
         self.logger = logging.getLogger(__name__)
 
     def evaluate(self, model):
-        self.logger.info("Starting evaluation on dataset of size {}...".format(self.dataset.__len__()))
+        self.logger.info("Starting evaluation on dataset of size {}...".format(len(self.dataset)))
         self.metric_list.reset()
         if self.loss:
             self.metric_list.results["val_loss"] = []  # add an entry for val loss
@@ -30,27 +33,61 @@ class Evaluator:
 
         inference_dict = {}
         with torch.no_grad():
-            for idx, data_input in tqdm.tqdm(enumerate(DataLoader(self.dataset, batch_size=1)),
-                                             total=self.dataset.__len__(), desc="[evaluation progress =>]"):
+            for idx, data_input in tqdm.tqdm(enumerate(DataLoader(self.dataset, batch_size=1, num_workers=0)),  # test if num workers works here
+                                             total=len(self.dataset), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
-                sample = data_input["image"].to(self.device)
-                labels = data_input["gt_mask"].squeeze(1).to(self.device)
+                sample = data_input["image"]  # shape is (batch, channel, depth, height, width)
+                labels = data_input["gt_mask"]
+
+                # divide sample into patches
+                if self.patch_wise:
+                    _, c, z, y, x = sample.shape
+                    # remove slices along axial direction if necessary so it can be split into equal number patches
+                    num_slices = int(np.ceil(z / self.patch_wise[2]) * self.patch_wise[2] - self.patch_wise[2])
+                    sample, labels = sample[:, :, :num_slices], labels[:, :, :num_slices]
+
+                    # reshape sample and labels, assumes tensors can be evenly divided in coronal and frontal direction by patch_wise
+                    sample = sample.reshape(
+                        np.prod(self.patch_wise), c, z // self.patch_wise[2], y // self.patch_wise[1], x // self.patch_wise[0]
+                    )
+                    _, c, z, y, x = labels.shape
+                    orig_labels = labels.clone()
+                    labels = labels.reshape(
+                        np.prod(self.patch_wise), c, z // self.patch_wise[2], y // self.patch_wise[1], x // self.patch_wise[0]
+                    )
 
                 # runs the forward pass with autocasting if enabled
                 with autocast(enabled=self.amp_enabled):
-                    preds = model(sample).detach()
+                    # iterate through each paired sample and label and get predictions from model
+                    # feeding individual samples removes the condition of gpu memory fitting whole scan
+                    preds = []
+                    val_loss = []
+                    for X, y in zip(sample, labels):
+                        X, y = X.unsqueeze(0), y.unsqueeze(0)
+                        y_hat = model(X.to(self.device)).detach()
 
-                    if self.loss is not None:
-                        val_loss = self.loss(preds, labels)
-                        if type(val_loss) is dict:
-                            val_loss = sum(val_loss.values())
-                        self.metric_list.results["val_loss"].append(val_loss.item())
+                        if self.loss:
+                            L = self.loss(y_hat, y)
+                            if type(L) is dict:
+                                L = sum(L.values())
+                            val_loss.append(L)
+
+                        preds.append(y_hat.squeeze().cpu())
+
+                    preds = torch.stack(preds)
+                    val_loss = torch.stack(val_loss)
+                    self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
 
                     # apply final activation on preds
                     preds = model.final_activation(preds)
 
+                    # combine pred patches to a single sample
+                    if self.patch_wise:
+                        preds = preds.reshape(orig_labels.shape)
+                        labels = orig_labels
+
                     # apply thresholding if it is specified
-                    if self.thresholds is not None:
+                    if self.thresholds:
                         preds[:] = self.threshold_predictions(preds.squeeze(1))
 
                     self.metric_list(preds, labels)

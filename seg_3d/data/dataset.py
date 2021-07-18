@@ -31,11 +31,12 @@ class JointTransform3D:
     """
 
     def __init__(self, test: bool = False, crop: Tuple = None, p_flip: float = None, deform_sigma: float = None,
-                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, **kwargs):
+                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, multi_scale: List[int] = None, **kwargs):
         self.crop = crop
         self.p_flip = p_flip
         self.div_by_max = div_by_max
         self.test = test
+        self.multi_scale = multi_scale
 
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
@@ -66,6 +67,10 @@ class JointTransform3D:
         # transforming to tensor
         image = torch.Tensor(image)
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
+
+        # apply scaling
+        if self.multi_scale and not self.test:
+            return NotImplementedError
 
         # random crop
         if self.crop:
@@ -115,7 +120,7 @@ class ImageToImage3D(Dataset):
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
                  joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None,
-                 patch_wise: Tuple[int, int, int] = (1, 1, 1), **kwargs) -> None:
+                 patch_wise: Tuple[int] = None, **kwargs) -> None:
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
@@ -166,6 +171,10 @@ class ImageToImage3D(Dataset):
             joint_transform = JointTransform3D(crop=None, p_flip=0, deform_sigma=None, div_by_max=False)
         self.joint_transform = joint_transform
 
+        # if dataset is used during evaluation/testing then disable patch-wise during data fetching
+        if self.joint_transform.test or self.patch_wise is None:
+            self.patch_wise = (1, 1, 1)
+
     def __len__(self) -> int:
         return len(self.patient_keys) * np.prod(self.patch_wise)
 
@@ -181,14 +190,6 @@ class ImageToImage3D(Dataset):
 
         # get the raw image size for each modality
         raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modality}
-
-        # get the range of slices
-        if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:
-            patch_idx = idx % self.patch_wise[2]
-            size = raw_image_size_dict[self.modality[0]][0] // self.patch_wise[2]  # assumes scans have same number of slices across modalities
-            slice_range = slice(patch_idx * size, (patch_idx + 1) * size)
-        else:
-            slice_range = slice(0, self.num_slices)
 
         # TODO: get SUV values from PET
         if "CT" in self.modality:
@@ -211,26 +212,37 @@ class ImageToImage3D(Dataset):
             for roi in mask_dict:
                 mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image)
                 # convert to npy and keep specified slices
-                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])[slice_range]
+                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])
 
             # convert image to npy, keep specified slices, and set channels as first dimension
             image = np.moveaxis(
                 convert_image_to_npy(image), source=-1, destination=0
-            )[:, slice_range]
+            )
 
         else:
             # convert to npy and keep specified slices
             image_dict_npy = {
-                modality: convert_image_to_npy(image_dict[modality])[slice_range] for modality in self.modality
+                modality: convert_image_to_npy(image_dict[modality]) for modality in self.modality
             }
             # generate a single ndarray
             image = np.asarray([*image_dict_npy.values()])
 
-        # keep copy of image before further image preprocessing
-        orig_image = np.copy(image)
+        # get the range of slices
+        if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:
+            patch_idx = idx % self.patch_wise[2]
+            size = raw_image_size_dict[self.modality[0]][0] // self.patch_wise[2]  # assumes scans have same number of slices across modalities
+            slice_range = slice(patch_idx * size, (patch_idx + 1) * size)  # could have option to add padding for overlapping patches here
+        elif not self.joint_transform.test:
+            slice_range = slice(0, self.num_slices)
+        else:
+            slice_range = slice(0, len(image[0]))  # if in test mode just return the whole scan
 
+        image = image[:, slice_range]
         # generate a single ndarray
         mask = np.asarray([*mask_dict_npy.values()])[:, slice_range]
+
+        # keep copy of image before further image preprocessing
+        orig_image = np.copy(image)
 
         # apply centre crop
         if self.crop_size is not None:
@@ -264,7 +276,7 @@ class ImageToImage3D(Dataset):
         r = 0 if self.patch_wise[0] == 1 else r
         c = 0 if self.patch_wise[1] == 1 else c
 
-        # gen slice objects
+        # gen slice objects, could have option to add padding for overlapping patches here
         s1 = slice(r * m, (r + 1) * m)
         s2 = slice(c * n, (c + 1) * n)
 

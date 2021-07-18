@@ -65,7 +65,7 @@ def train(model):
     # init eval metrics and evaluator
     metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
     evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset,
-                          metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED)
+                          metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED, patch_wise=train_dataset.patch_wise)
 
     # init checkpointers
     checkpointer = Checkpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)

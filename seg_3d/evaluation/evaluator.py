@@ -40,7 +40,7 @@ class Evaluator:
                 labels = data_input["gt_mask"]
 
                 # divide sample into patches
-                if self.patch_wise:
+                if self.patch_wise and np.prod(self.patch_wise) != 1:
                     _, c, z, y, x = sample.shape
                     # remove slices along axial direction if necessary so it can be split into equal number patches
                     num_slices = int(np.ceil(z / self.patch_wise[2]) * self.patch_wise[2] - self.patch_wise[2])
@@ -63,8 +63,8 @@ class Evaluator:
                     preds = []
                     val_loss = []
                     for X, y in zip(sample, labels):
-                        X, y = X.unsqueeze(0), y.unsqueeze(0)
-                        y_hat = model(X.to(self.device)).detach()
+                        X, y = X.unsqueeze(0).to(self.device), y.unsqueeze(0).to(self.device)
+                        y_hat = model(X).detach()
 
                         if self.loss:
                             L = self.loss(y_hat, y)
@@ -72,14 +72,14 @@ class Evaluator:
                                 L = sum(L.values())
                             val_loss.append(L)
 
-                        preds.append(y_hat.squeeze().cpu())
+                        preds.append(
+                            # apply final activation on preds
+                            model.final_activation(y_hat).squeeze().cpu()
+                        )
 
                     preds = torch.stack(preds)
                     val_loss = torch.stack(val_loss)
                     self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
-
-                    # apply final activation on preds
-                    preds = model.final_activation(preds)
 
                     # combine pred patches to a single sample
                     if self.patch_wise:

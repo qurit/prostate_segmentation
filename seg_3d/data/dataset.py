@@ -227,19 +227,19 @@ class ImageToImage3D(Dataset):
             # generate a single ndarray
             image = np.asarray([*image_dict_npy.values()])
 
-        # get the range of slices
+        # generate a single ndarray
+        mask = np.asarray([*mask_dict_npy.values()])
+
+        # need to have same tensor shape across samples in batch
+        if not self.joint_transform.test:
+            image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
+
+        # from remaining slices get the range of slices for particular patch
         if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:
             patch_idx = idx % self.patch_wise[2]
-            size = raw_image_size_dict[self.modality[0]][0] // self.patch_wise[2]  # assumes scans have same number of slices across modalities
+            size = len(image[0]) // self.patch_wise[2]
             slice_range = slice(patch_idx * size, (patch_idx + 1) * size)  # could have option to add padding for overlapping patches here
-        elif not self.joint_transform.test:
-            slice_range = slice(0, self.num_slices)
-        else:
-            slice_range = slice(0, len(image[0]))  # if in test mode just return the whole scan
-
-        image = image[:, slice_range]
-        # generate a single ndarray
-        mask = np.asarray([*mask_dict_npy.values()])[:, slice_range]
+            image, mask = image[:, slice_range], mask[:, slice_range]
 
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)

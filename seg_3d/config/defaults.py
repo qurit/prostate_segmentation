@@ -60,7 +60,7 @@ _C.LOSS.FN = "DiceLoss"  # available loss functions are inside losses.py
 # -----------------------------------------------------------------------------
 # SOLVER
 # -----------------------------------------------------------------------------
-_C.SOLVER = CN()
+_C.SOLVER = CN(new_allowed=True)
 _C.SOLVER.PARAMS = CN(new_allowed=True)
 
 _C.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim

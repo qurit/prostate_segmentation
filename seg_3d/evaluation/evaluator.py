@@ -22,9 +22,13 @@ class Evaluator:
         self.loss = loss
         self.thresholds = thresholds
         self.amp_enabled = amp_enabled
-        self.patch_wise = patch_wise
         self.num_workers = num_workers
         self.logger = logging.getLogger(__name__)
+
+        if patch_wise is not None and np.prod(patch_wise) != 1:
+            self.patch_wise = patch_wise
+        else:
+            self.patch_wise = None
 
     def evaluate(self, model):
         self.logger.info("Starting evaluation on dataset of size {}...".format(len(self.dataset)))
@@ -42,7 +46,7 @@ class Evaluator:
                 labels = data_input["gt_mask"]
 
                 # divide sample into patches
-                if self.patch_wise and np.prod(self.patch_wise) != 1:
+                if self.patch_wise:
                     _, c, z, y, x = sample.shape
                     # remove slices along axial direction if necessary so it can be split into equal number patches
                     num_slices = int(np.ceil(z / self.patch_wise[2]) * self.patch_wise[2] - self.patch_wise[2])

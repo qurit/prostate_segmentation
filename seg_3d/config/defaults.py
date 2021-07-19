@@ -108,6 +108,7 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 # MISC
 # -----------------------------------------------------------------------------
 _C.SEED = 99
+_C.NUM_WORKERS = 0  # number of workers for the data loaders
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

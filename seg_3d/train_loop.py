@@ -64,7 +64,7 @@ def train(model):
 
     # init eval metrics and evaluator
     metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
-    evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset,
+    evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, num_workers=cfg.NUM_WORKERS,
                           metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED, patch_wise=cfg.DATASET.PARAMS.patch_wise)
 
     # init checkpointers
@@ -96,7 +96,7 @@ def train(model):
             # start main training loop
             for iteration, batched_inputs in zip(
                     range(start_iter, max_iter),
-                    DataLoader(train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+                    DataLoader(train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH, num_workers=cfg.NUM_WORKERS,
                                sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
             ):
 

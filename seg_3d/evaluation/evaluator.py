@@ -14,7 +14,8 @@ from seg_3d.evaluation.metrics import MetricList
 
 class Evaluator:
     def __init__(self, device: str, dataset: ImageToImage3D, metric_list: MetricList, loss: Callable = None,
-                 thresholds: List[float] = None, amp_enabled: bool = False, patch_wise: Tuple[int] = None):
+                 thresholds: List[float] = None, amp_enabled: bool = False, patch_wise: Tuple[int] = None,
+                 num_workers: int = 0):
         self.device = device
         self.dataset = dataset
         self.metric_list = metric_list
@@ -22,6 +23,7 @@ class Evaluator:
         self.thresholds = thresholds
         self.amp_enabled = amp_enabled
         self.patch_wise = patch_wise
+        self.num_workers = num_workers
         self.logger = logging.getLogger(__name__)
 
     def evaluate(self, model):
@@ -33,7 +35,7 @@ class Evaluator:
 
         inference_dict = {}
         with torch.no_grad():
-            for idx, data_input in tqdm.tqdm(enumerate(DataLoader(self.dataset, batch_size=1, num_workers=0)),  # test if num workers works here
+            for idx, data_input in tqdm.tqdm(enumerate(DataLoader(self.dataset, batch_size=1, num_workers=self.num_workers)),
                                              total=len(self.dataset), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"]  # shape is (batch, channel, depth, height, width)

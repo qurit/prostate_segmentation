@@ -74,9 +74,10 @@ def train(model):
     periodic_checkpointer = PeriodicCheckpointer(checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter)
 
     # init writers which periodically output/save metric scores
+    # window_size gives option to do median smoothing of metrics
     writers = [CommonMetricPrinter(max_iter, window_size=1),
-               JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json")),
-               TensorboardXWriter(cfg.OUTPUT_DIR)]
+               JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json"), window_size=1),
+               TensorboardXWriter(cfg.OUTPUT_DIR, window_size=1)]
 
     # init tensorboard formatter for images
     tensorboard_img_formatter = DefaultTensorboardFormatter()
@@ -100,7 +101,7 @@ def train(model):
                                sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
             ):
 
-                storage.step()
+                storage.iter = iteration
                 sample = batched_inputs["image"]
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
 
@@ -145,7 +146,7 @@ def train(model):
                 # check if need to run eval step on validation data
                 if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
                     results = evaluator.evaluate(model)
-                    storage.put_scalars(**results["metrics"])
+                    storage.put_scalars(**results["metrics"], smoothing_hint=False)
 
                     # check early stopping
                     if early_stopping.check_early_stopping(results["metrics"]):
@@ -165,6 +166,8 @@ def train(model):
                 # if iteration - start_iter > 5 and ((iteration + 1) % 20 == 0 or iteration == max_iter - 1):
                 for writer in writers:
                     writer.write()
+                # images have been written to tensorboard file so clear them from memory
+                storage.clear_images()
                 periodic_checkpointer.step(iteration)
 
     finally:

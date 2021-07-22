@@ -215,9 +215,6 @@ class ImageToImage3D(Dataset):
             # generate a single ndarray
             image = np.asarray([*image_dict_npy.values()])
 
-        # keep copy of image before further image preprocessing
-        orig_image = np.copy(image)
-
         # generate a single ndarray
         masks = np.asarray([*mask_dict_npy.values()])[:, :self.num_slices]
 
@@ -225,6 +222,9 @@ class ImageToImage3D(Dataset):
         if self.crop_size is not None:
             image = centre_crop(image, (*image.shape[:2], *self.crop_size))
             masks = centre_crop(masks, (*masks.shape[:2], *self.crop_size))
+
+        # keep copy of image before further image preprocessing
+        orig_image = np.copy(image)
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, masks)

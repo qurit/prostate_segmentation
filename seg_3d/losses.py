@@ -137,8 +137,9 @@ class BCEDiceWithOverlapLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
     def __init__(self, bce_weight, dice_weight, overlap_weight=0, overlap_idx=(1, 2),
-                 class_weight=None, normalization="sigmoid", class_labels=None):
+                 class_weight=None, class_weight_loss="both", normalization="sigmoid", class_labels=None):
         super(BCEDiceWithOverlapLoss, self).__init__()
+        assert class_weight_loss in ["both", "bce", "dice"]
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
@@ -150,18 +151,24 @@ class BCEDiceWithOverlapLoss(nn.Module):
 
         if class_weight is not None:
             self.class_weight = torch.as_tensor(class_weight, dtype=torch.float)
-            pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1)
-            self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            if class_weight_loss in ["both", "bce"]:
+	        # apply weighting to both loss terms
+                pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1)
+                self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            if class_weight_loss is "bce":
+                # weighting only for bce, so set weight for dice to 1
+                self.class_weight = torch.as_tensor(1)
         else:
             self.class_weight = torch.as_tensor(1)
 
     def overlap(self, pred, gt) -> torch.Tensor:
+        pred = nn.Softmax(dim=1)(pred)
         # get the right channels from pred and gt tensors
         pred = pred[:, self.overlap_idx[0], ...]
         gt = gt[:, self.overlap_idx[1], ...]
 
         if gt.sum() != 0:
-            return (nn.Softmax(dim=1)(pred) * gt).sum() / gt.sum()
+            return (pred * gt).sum() / gt.sum()
 
         return torch.tensor(0.)
 
@@ -178,7 +185,8 @@ class BCEDiceWithOverlapLoss(nn.Module):
         bce_loss = self.bce(input, target)
 
         # overlap
-        overlap_loss = self.overlap(input, target) if self.overlap_weight > 0 else torch.tensor(0.)
+        # don't compute overlap if overlap_idx is set to None
+        overlap_loss = self.overlap(input, target) if self.overlap_idx else torch.tensor(0.)
 
         if self.class_labels is not None:
             dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]

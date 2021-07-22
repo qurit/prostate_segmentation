@@ -60,7 +60,7 @@ _C.LOSS.FN = "DiceLoss"  # available loss functions are inside losses.py
 # -----------------------------------------------------------------------------
 # SOLVER
 # -----------------------------------------------------------------------------
-_C.SOLVER = CN()
+_C.SOLVER = CN(new_allowed=True)
 _C.SOLVER.PARAMS = CN(new_allowed=True)
 
 _C.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim
@@ -102,11 +102,13 @@ _C.TEST.THRESHOLDS = None
 # weights from .pth file specified in checkpoint file inside _C.OUTPUT_DIR
 _C.RESUME = False
 _C.EVAL_ONLY = False  # Option to only run evaluation on data specified by _C.DATASET.TEST_DATASET_PATH
+_C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DATASET.TEST_DATASET_PATH
 
 # -----------------------------------------------------------------------------
 # MISC
 # -----------------------------------------------------------------------------
 _C.SEED = 99
+_C.NUM_WORKERS = 0  # number of workers for the data loaders
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

@@ -1,11 +1,12 @@
 # original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/losses.py
 import logging
+from typing import Dict
 
 import torch
 import torch.nn.functional as F
+from fvcore.common.registry import Registry
 from torch import nn as nn
 from torch.autograd import Variable
-from fvcore.common.registry import Registry
 
 from seg_3d.utils.seg_utils import expand_as_one_hot
 
@@ -102,34 +103,22 @@ class GeneralizedDiceLoss(_AbstractDiceLoss):
 class BCEDiceLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, bce_weight, dice_weight, normalization="sigmoid"):
+    def __init__(self, bce_weight, dice_weight, normalization="sigmoid", class_balanced=False):
         super(BCEDiceLoss, self).__init__()
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
         self.dice = DiceLoss(normalization=normalization)
+        self.class_balanced = class_balanced
 
     def forward(self, input, target):
+        if self.class_balanced:
+            num_classes = input.size()[1]
+            weights = [target[:, 0, ...].sum() / target[:, x, ...].sum() for x in range(num_classes)]
+            weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).to(input.device)
+            self.bce = nn.BCEWithLogitsLoss(pos_weight=weights)
+
         return self.bce_weight * self.bce(input, target) + self.dice_weight * self.dice(input, target).sum()
-
-
-@LOSS_REGISTRY.register()
-class WBCEDiceLoss(nn.Module):
-    """Linear combination of BCE and Dice losses"""
-
-    def __init__(self, bce_weight, dice_weight, normalization="sigmoid"):
-        super(WBCEDiceLoss, self).__init__()
-        self.bce_weight = bce_weight
-        self.dice_weight = dice_weight
-        self.dice = DiceLoss(normalization=normalization)
-
-    def forward(self, input, target):
-        num_classes = input.size()[1]
-        weights = [target[:, 0, ...].sum() / target[:, x, ...].sum() for x in range(num_classes)]
-        weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).to(input.device)
-        bce = nn.BCEWithLogitsLoss(pos_weight=weights)
-
-        return self.bce_weight * bce(input, target) + self.dice_weight * self.dice(input, target).sum()
 
 
 @LOSS_REGISTRY.register()
@@ -152,7 +141,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         if class_weight is not None:
             self.class_weight = torch.as_tensor(class_weight, dtype=torch.float)
             if class_weight_loss in ["both", "bce"]:
-	        # apply weighting to both loss terms
+	              # apply weighting to both loss terms
                 pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1)
                 self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             if class_weight_loss is "bce":
@@ -161,18 +150,19 @@ class BCEDiceWithOverlapLoss(nn.Module):
         else:
             self.class_weight = torch.as_tensor(1)
 
-    def overlap(self, pred, gt) -> torch.Tensor:
+    @staticmethod
+    def overlap(pred_chan, gt_chan, pred, gt) -> torch.Tensor:
         pred = nn.Softmax(dim=1)(pred)
         # get the right channels from pred and gt tensors
-        pred = pred[:, self.overlap_idx[0], ...]
-        gt = gt[:, self.overlap_idx[1], ...]
+        pred = pred[:, pred_chan, ...]
+        gt = gt[:, gt_chan, ...]
 
         if gt.sum() != 0:
             return (pred * gt).sum() / gt.sum()
 
         return torch.tensor(0.)
 
-    def forward(self, input, target):
+    def forward(self, input, target) -> Dict[str, torch.Tensor]:
         # dice
         dice_loss = self.dice(input, target)
         # get raw dice scores
@@ -186,7 +176,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
 
         # overlap
         # don't compute overlap if overlap_idx is set to None
-        overlap_loss = self.overlap(input, target) if self.overlap_idx else torch.tensor(0.)
+        overlap_loss = self.overlap(*self.overlap_idx, input, target) if self.overlap_idx else torch.tensor(0.)
 
         if self.class_labels is not None:
             dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]

@@ -1,10 +1,9 @@
-# original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/dataset.py
+import glob
 import json
 import logging
 import os
 from collections import OrderedDict
-from typing import Callable
-from typing import List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import elasticdeform
 import numpy as np
@@ -18,7 +17,7 @@ from seg_3d.data.itk_image_resample import read_scan_as_sitk_image, convert_imag
 from utils import contour2mask, centre_crop
 
 
-class JointTransform2D:
+class JointTransform3D:
     """
     Performs augmentation on image and mask when called. Due to the randomness of augmentation transforms,
     it is not enough to simply apply the same Transform from torchvision on the image and mask separetely.
@@ -31,11 +30,13 @@ class JointTransform2D:
         p_flip: float, the probability of performing a random horizontal flip.
     """
 
-    def __init__(self, test=False, crop=(100, 100), p_flip=0.5, deform_sigma=None, deform_points=(3, 3, 3), div_by_max=True):
+    def __init__(self, test: bool = False, crop: Tuple = None, p_flip: float = None, deform_sigma: float = None,
+                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, multi_scale: List[int] = None, **kwargs):
         self.crop = crop
         self.p_flip = p_flip
         self.div_by_max = div_by_max
         self.test = test
+        self.multi_scale = multi_scale
 
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
@@ -44,7 +45,7 @@ class JointTransform2D:
         else:
             self.deform = lambda x, y: [*x, *y]
 
-    def __call__(self, image, masks):
+    def __call__(self, image: np.ndarray, masks: np.ndarray) -> Tuple[torch.tensor, torch.tensor]:
 
         # divide by scan max
         if self.div_by_max:
@@ -66,6 +67,10 @@ class JointTransform2D:
         # transforming to tensor
         image = torch.Tensor(image)
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
+
+        # apply scaling
+        if self.multi_scale and not self.test:
+            return NotImplementedError
 
         # random crop
         if self.crop:
@@ -108,13 +113,14 @@ class ImageToImage3D(Dataset):
         modality: specifies modality of scan
         rois: list of region of interests
         patient_keys: optional arg to specify patients, if None then use all patients from dataset
-        joint_transform: augmentation transform, an instance of JointTransform2D. If bool(joint_transform)
+        joint_transform: augmentation transform, an instance of JointTransform3D. If bool(joint_transform)
             evaluates to False, torchvision.transforms.ToTensor will be used on both image and mask.
     """
 
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
-                 joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None, **kwargs) -> None:
+                 joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None,
+                 patch_wise: Tuple[int] = None, **kwargs) -> None:
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
@@ -126,6 +132,7 @@ class ImageToImage3D(Dataset):
         self.slice_shape = slice_shape
         self.crop_size = crop_size
         self.num_patients = num_patients  # used for train-val-test split
+        self.patch_wise = patch_wise  # non-overlapping patch-wise training, number of patches in each dim (x, y, z)
         self.logger = logging.getLogger(__name__)
 
         if type(dataset_path) is str:
@@ -161,14 +168,19 @@ class ImageToImage3D(Dataset):
         }
 
         if joint_transform is None:
-            joint_transform = JointTransform2D(crop=None, p_flip=0, deform_sigma=None, div_by_max=False)
+            joint_transform = JointTransform3D(crop=None, p_flip=0, deform_sigma=None, div_by_max=False)
         self.joint_transform = joint_transform
 
+        # if dataset is used during evaluation/testing then disable patch-wise during data fetching
+        if self.joint_transform.test or self.patch_wise is None:
+            self.patch_wise = (1, 1, 1)
+
     def __len__(self) -> int:
-        return len(self.patient_keys)
+        return len(self.patient_keys) * np.prod(self.patch_wise)
 
     def __getitem__(self, idx) -> dict:
-        patient = list(self.patient_keys)[idx]
+        # divide index by number of patches to get patient idx
+        patient = list(self.patient_keys)[idx // np.prod(self.patch_wise)]
         patient_dir = self.all_patient_fps[patient]
 
         # read image
@@ -200,34 +212,48 @@ class ImageToImage3D(Dataset):
             for roi in mask_dict:
                 mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image)
                 # convert to npy and keep specified slices
-                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])[:self.num_slices]
+                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])
 
             # convert image to npy, keep specified slices, and set channels as first dimension
             image = np.moveaxis(
                 convert_image_to_npy(image), source=-1, destination=0
-            )[:, :self.num_slices]
+            )
 
         else:
             # convert to npy and keep specified slices
             image_dict_npy = {
-                modality: convert_image_to_npy(image_dict[modality])[:self.num_slices] for modality in self.modality
+                modality: convert_image_to_npy(image_dict[modality]) for modality in self.modality
             }
             # generate a single ndarray
             image = np.asarray([*image_dict_npy.values()])
 
         # generate a single ndarray
-        masks = np.asarray([*mask_dict_npy.values()])[:, :self.num_slices]
+        mask = np.asarray([*mask_dict_npy.values()])
+
+        # need to have same tensor shape across samples in batch
+        if not self.joint_transform.test:
+            image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
+
+        # from remaining slices get the range of slices for particular patch
+        if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:
+            patch_idx = idx % self.patch_wise[2]
+            size = len(image[0]) // self.patch_wise[2]
+            slice_range = slice(patch_idx * size, (patch_idx + 1) * size)  # could have option to add padding for overlapping patches here
+            image, mask = image[:, slice_range], mask[:, slice_range]
 
         # apply centre crop
         if self.crop_size is not None:
             image = centre_crop(image, (*image.shape[:2], *self.crop_size))
-            masks = centre_crop(masks, (*masks.shape[:2], *self.crop_size))
+            mask = centre_crop(mask, (*mask.shape[:2], *self.crop_size))
+
+        # get patch
+        image, mask = self.get_patch(idx, image, mask)
 
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)
 
         # apply transforms and convert to tensors
-        image, mask = self.joint_transform(image, masks)
+        image, mask = self.joint_transform(image, mask)
 
         return {
             "orig_image": orig_image,
@@ -236,7 +262,28 @@ class ImageToImage3D(Dataset):
             "patient": patient
         }
 
-    def get_mask(self, patient, image_size_dict) -> dict:
+    def get_patch(self, idx: int, image: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        if np.prod(self.patch_wise[:2]) == 1:  # do nothing if patch size is 1x1
+            return image, mask
+
+        # find the patch, indices for a 2x2 grid go like [0, 1; 2, 3]
+        patch_idx = idx % np.prod(self.patch_wise[:2])
+        # compute dimensions of patch
+        m, n = (image.shape[2:] / np.asarray(self.patch_wise[:2])).astype(int)
+        # find the row and column of the patch
+        r, c = patch_idx // self.patch_wise[0], patch_idx % self.patch_wise[1]
+        # handle case if patch size is a single column or row
+        r = 0 if self.patch_wise[0] == 1 else r
+        c = 0 if self.patch_wise[1] == 1 else c
+
+        # gen slice objects, could have option to add padding for overlapping patches here
+        s1 = slice(r * m, (r + 1) * m)
+        s2 = slice(c * n, (c + 1) * n)
+
+        # return the patch from image and mask
+        return image[:, :, s1, s2], mask[:, :, s1, s2]
+
+    def get_mask(self, patient: str, image_size_dict: Dict[str, Tuple]) -> dict:
         # get all rois from the dataset
         patient_rois = {
             modality: list(self.dataset_dict[patient][modality]["rois"].keys()) for modality in self.modality
@@ -275,8 +322,8 @@ class ImageToImage3D(Dataset):
                 roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != "Background"
         })
 
-    def process_tumor_mask(self, mask):
-        tumor_keys = [x for x in mask.keys() if "Tumor" in x]
+    def process_tumor_mask(self, mask: Dict[str, np.ndarray]) -> None:
+        tumor_keys = [x for x in mask if "Tumor" in x]
         tumor_mask = np.zeros_like(mask["Tumor"])
 
         # merge Tumor rois into a single channel
@@ -292,3 +339,36 @@ class ImageToImage3D(Dataset):
 
         # update tumor mask in the mask dict
         mask["Tumor"] = tumor_mask
+
+
+class Image3D(Dataset):
+    """
+    Dataset class purely for inference TODO: test me
+    """
+    def __init__(self, dataset_path: str or List[str], path_suffix: str = "", transform: Callable = None, **kwargs) -> None:
+        if type(dataset_path) is str:
+            self.dataset_path = [dataset_path]
+        else:
+            self.dataset_path = dataset_path
+
+        # get all the subdirectories containing scans
+        self.scan_fps = [
+            os.path.join(scan_path, path_suffix) for dp in self.dataset_path
+            for scan_path in glob.glob(os.path.join(dp, "/*/"))
+        ]
+
+        self.transform = transform or torch.Tensor
+
+    def __len__(self) -> int:
+        return len(self.scan_fps)
+
+    def __getitem__(self, idx):
+        scan = list(self.scan_fps)[idx]
+
+        # read image
+        image = read_scan_as_sitk_image(scan)
+
+        # convert to npy array
+        image = convert_image_to_npy(image)
+
+        return self.transform(image)

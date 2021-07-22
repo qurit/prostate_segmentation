@@ -241,9 +241,6 @@ class ImageToImage3D(Dataset):
             slice_range = slice(patch_idx * size, (patch_idx + 1) * size)  # could have option to add padding for overlapping patches here
             image, mask = image[:, slice_range], mask[:, slice_range]
 
-        # keep copy of image before further image preprocessing
-        orig_image = np.copy(image)
-
         # apply centre crop
         if self.crop_size is not None:
             image = centre_crop(image, (*image.shape[:2], *self.crop_size))
@@ -251,6 +248,9 @@ class ImageToImage3D(Dataset):
 
         # get patch
         image, mask = self.get_patch(idx, image, mask)
+
+        # keep copy of image before further image preprocessing
+        orig_image = np.copy(image)
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)

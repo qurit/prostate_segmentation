@@ -82,7 +82,8 @@ def dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def classwise_dice_score(pred, gt):
-    return compute_per_channel_dice(pred, gt, epsilon=1e-6).detach().cpu().numpy()
+    # FIXME: issue when AMP=True and pred and gt are on cpu, so put them on gpu
+    return compute_per_channel_dice(pred.cuda(), gt.cuda(), epsilon=1e-6).cpu().numpy()
 
 
 @METRIC_REGISTRY.register()

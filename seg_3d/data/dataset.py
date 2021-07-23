@@ -231,8 +231,7 @@ class ImageToImage3D(Dataset):
         mask = np.asarray([*mask_dict_npy.values()])
 
         # need to have same tensor shape across samples in batch
-        if not self.joint_transform.test:
-            image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
+        image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
 
         # from remaining slices get the range of slices for particular patch
         if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:

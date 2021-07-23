@@ -9,7 +9,7 @@ pandas
 pydicom
 pytorch
 pyyaml
-scikit-image>=0.18.0
+scikit-image==0.18.0rc1
 scikit-learn
 scipy
 SimpleITK

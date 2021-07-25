@@ -21,7 +21,7 @@ from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.seg_utils import seed_all, TrainingSampler
+from seg_3d.utils.seg_utils import seed_all, TrainingSampler, plot_loss
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
 
@@ -63,7 +63,7 @@ def train(model):
     logger.info("Loss:\n{}".format(loss))
 
     # init eval metrics and evaluator
-    metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
+    metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
     evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, num_workers=cfg.NUM_WORKERS,
                           metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED, patch_wise=train_dataset.patch_wise)
 
@@ -92,8 +92,8 @@ def train(model):
     train_start = time()
     logger.info("Starting training from iteration {}".format(start_iter))
 
-    try:
-        with EventStorage(start_iter) as storage:
+    with EventStorage(start_iter) as storage:
+        try:
             # start main training loop
             for iteration, batched_inputs in zip(
                     range(start_iter, max_iter),
@@ -170,10 +170,30 @@ def train(model):
                 storage.clear_images()
                 periodic_checkpointer.step(iteration)
 
-    finally:
-        # add more logic here to do something before finishing execution
-        train_time = time() - train_start
-        logger.info("Completed training in %.0f s (%.2f h)" % (train_time, train_time / 3600))
+        finally:
+            # add more logic here to do something before finishing execution
+            train_time = time() - train_start
+            logger.info("Completed training in %.0f s (%.2f h)" % (train_time, train_time / 3600))
+
+            # plot loss curve
+            path = os.path.join(cfg.OUTPUT_DIR, "model_loss.png")
+            plot_loss(path, storage)
+            logger.info("Saved model loss figure at {}".format(path))
+
+            # run final evaluation with best model
+            if cfg.TEST.FINAL_EVAL_METRICS:
+                logger.info("Running final evaluation with best model...")
+                # load best model
+                checkpointer.load(os.path.join(cfg.OUTPUT_DIR, "model_best.pth"), checkpointables=["model"])
+
+                # add new metrics to metric list
+                metric_list.metrics = get_metrics(cfg.TEST.FINAL_EVAL_METRICS)
+
+                # run evaluation and save metrics to a .txt file
+                with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
+                    json.dump(
+                        evaluator.evaluate(model)["metrics"], f, indent=4
+                    )
 
 
 def run():
@@ -195,7 +215,7 @@ def run():
 
     if cfg.EVAL_ONLY:
         logger.info("Running evaluation only!")
-        Checkpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
+        Checkpointer(model, save_dir=cfg.OUTPUT_DIR).load(cfg.MODEL.WEIGHTS, checkpointables=["model"])
 
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
@@ -204,7 +224,7 @@ def run():
                                       **cfg.DATASET.PARAMS)
 
         # init eval metrics and evaluator
-        metric_list = MetricList(metrics=get_metrics(cfg), class_labels=cfg.DATASET.CLASS_LABELS)
+        metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
         evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
                               metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
 
@@ -216,7 +236,7 @@ def run():
 
     elif cfg.PRED_ONLY:  # TODO
         logger.info("Running inference only!")
-        Checkpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(cfg.MODEL.WEIGHTS, resume=False)
+        Checkpointer(model, save_dir=cfg.OUTPUT_DIR).load(cfg.MODEL.WEIGHTS, checkpointables=["model"])
 
         # get dataset for inference
         test_dataset = Image3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH)

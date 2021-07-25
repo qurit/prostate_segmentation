@@ -4,6 +4,7 @@ import random
 from typing import Optional
 
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Sampler
 
@@ -15,6 +16,19 @@ def seed_all(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True  # may result in a slowdown if set to True
+
+
+def plot_loss(path, storage):
+    plt.figure()
+    train_loss = np.asarray(storage.history("training_loss").values())
+    val_loss = np.asarray(storage.history("val_loss").values())
+    plt.plot(train_loss[:, 1], train_loss[:, 0], label="Training")
+    plt.plot(val_loss[:, 1], val_loss[:, 0], label="Validation")
+    plt.xlabel("Iteration #")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Model loss")
+    plt.savefig(path)
 
 
 def find_maximum_patch_size(model, device):

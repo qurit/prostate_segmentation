@@ -139,14 +139,19 @@ class BCEDiceWithOverlapLoss(nn.Module):
         self.logger = logging.getLogger(__name__)
 
         if class_weight is not None:
-            self.class_weight = torch.as_tensor(class_weight, dtype=torch.float)
-            if class_weight_loss in ["both", "bce"]:
-	              # apply weighting to both loss terms
-                pos_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1)
-                self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-            if class_weight_loss is "bce":
-                # weighting only for bce, so set weight for dice to 1
-                self.class_weight = torch.as_tensor(1)
+            class_weight = torch.as_tensor(class_weight, dtype=torch.float)
+            if class_weight_loss in "dice":
+                self.class_weight = class_weight
+            elif class_weight_loss in "bce":
+                self.bce = nn.BCEWithLogitsLoss(
+                    pos_weight=self.class_weight.view(1, len(class_weight), 1, 1, 1)
+                )
+            else:
+                # apply class weight to both dice and bce
+                self.class_weight = class_weight
+                self.bce = nn.BCEWithLogitsLoss(
+                    pos_weight=self.class_weight.view(1, len(class_weight), 1, 1, 1)
+                )
         else:
             self.class_weight = torch.as_tensor(1)
 

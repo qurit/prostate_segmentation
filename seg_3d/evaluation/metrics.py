@@ -33,7 +33,7 @@ class MetricList:
             self.results[key].append(value(y_out, y_batch))
 
     def reset(self):
-        self.results = {key: [] for key in self.metrics.keys()}
+        self.results = {key: [] for key in self.metrics}
 
     def get_results_idx(self, idx):
         return {key: value[idx] for key, value in self.results.items()}
@@ -116,6 +116,10 @@ def argmax_dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def overlap(pred, gt):
+    # check if there are at least 3 channels
+    if pred.shape[1] < 3:
+        return np.NaN
+
     pred = pred.cpu().numpy().argmax(axis=1)
     gt = gt.cpu().numpy()
 
@@ -195,7 +199,7 @@ def classwise_f1_v2(pred, gt):
     return f1[1]
 
 
-def get_metrics(config):
+def get_metrics(metrics: List[str]):
     return {
-        metric: METRIC_REGISTRY.get(metric) for metric in config.TEST.EVAL_METRICS
+        metric: METRIC_REGISTRY.get(metric) for metric in metrics
     }

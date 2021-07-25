@@ -92,6 +92,7 @@ _C.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model
 # metrics which get computed during eval, available metrics found inside evaluation/metrics.py
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []
+_C.TEST.FINAL_EVAL_METRICS = []  # metrics to compute for the final eval step at the end of training
 _C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation
 _C.TEST.THRESHOLDS = None
 

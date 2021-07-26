@@ -49,24 +49,27 @@ class Evaluator:
                 if self.patch_wise:
                     _, c, z, y, x = sample.shape
                     # remove slices along axial direction if necessary so it can be split into equal number patches
-                    num_slices = int(np.ceil(z / self.patch_wise[2]) * self.patch_wise[2] - self.patch_wise[2])
+                    # num_slices = int(np.ceil(z / self.patch_wise[2]) * self.patch_wise[2] - self.patch_wise[2])
+                    num_slices = int(np.ceil(z / self.patch_wise[2]))
                     sample, labels = sample[:, :, :num_slices], labels[:, :, :num_slices]
 
                     # reshape sample and labels, assumes tensors can be evenly divided in coronal and frontal direction by patch_wise
                     sample = sample.reshape(
                         np.prod(self.patch_wise), c, z // self.patch_wise[2], y // self.patch_wise[1], x // self.patch_wise[0]
                     )
-                    _, c, z, y, x = labels.shape
-                    orig_labels = labels.clone()
-                    labels = labels.reshape(
-                        np.prod(self.patch_wise), c, z // self.patch_wise[2], y // self.patch_wise[1], x // self.patch_wise[0]
-                    )
+                    _, c2, z, y, x = labels.shape
+                    # orig_labels = labels.clone()
+                    labels = torch.cat([
+                        labels[:,cx,...].reshape(
+                            np.prod(self.patch_wise), c, z // self.patch_wise[2], y // self.patch_wise[1], x // self.patch_wise[0])
+                            for cx in range(c2)], dim=1)
 
                 # runs the forward pass with autocasting if enabled
                 with autocast(enabled=self.amp_enabled):
                     # iterate through each paired sample and label and get predictions from model
                     # feeding individual samples removes the condition of gpu memory fitting whole scan
                     preds = []
+                    final_labels = []
                     val_loss = []
                     for X, y in zip(sample, labels):
                         X, y = X.unsqueeze(0).to(self.device), y.unsqueeze(0).to(self.device)
@@ -84,13 +87,14 @@ class Evaluator:
                         )
 
                     preds = torch.stack(preds)
-                    val_loss = torch.stack(val_loss)
-                    self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
+                    if self.loss:
+                        val_loss = torch.stack(val_loss)
+                        self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
 
                     # combine pred patches to a single sample
-                    if self.patch_wise:
-                        preds = preds.reshape(orig_labels.shape)
-                        labels = orig_labels
+                    # if self.patch_wise:
+                        # preds = preds.reshape(orig_labels.shape)
+                        # labels = orig_labels
 
                     # apply thresholding if it is specified
                     if self.thresholds:

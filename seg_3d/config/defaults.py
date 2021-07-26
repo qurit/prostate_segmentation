@@ -36,6 +36,7 @@ _C.DATASET.TEST_PATIENT_KEYS = None
 _C.DATASET.PARAMS.modality_roi_map = [{"CT": ["Bladder"]}]
 _C.DATASET.PARAMS.num_slices = None  # number of slices in axial plane, if None then selects shortest scan length from dataset
 _C.DATASET.PARAMS.crop_size = None  # size of centre crop, if None then no centre cropping done
+_C.DATASET.PARAMS.patch_wise = None # Number of patches to split each dimension into; no patches would be (1,1,1)
 
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 

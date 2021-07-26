@@ -245,14 +245,14 @@ class ImageToImage3D(Dataset):
             image = centre_crop(image, (*image.shape[:2], *self.crop_size))
             mask = centre_crop(mask, (*mask.shape[:2], *self.crop_size))
 
-        # get patch
-        image, mask = self.get_patch(idx, image, mask)
-
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
+
+        # get patch
+        image, mask = self.get_patch(idx, image, mask)
 
         return {
             "orig_image": orig_image,

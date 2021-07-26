@@ -45,30 +45,15 @@ class Evaluator:
                 sample = data_input["image"]  # shape is (batch, channel, depth, height, width)
                 labels = data_input["gt_mask"]
 
-                # divide sample into patches
-                if self.patch_wise:
-                    _, c, z, y, x = sample.shape
-                    # remove slices along axial direction if necessary so it can be split into equal number patches
-                    num_slices = int(np.ceil(z / self.patch_wise[2]) * self.patch_wise[2] - self.patch_wise[2])
-                    sample, labels = sample[:, :, :num_slices], labels[:, :, :num_slices]
-
-                    # reshape sample and labels, assumes tensors can be evenly divided in coronal and frontal direction by patch_wise
-                    sample = sample.reshape(
-                        np.prod(self.patch_wise), c, z // self.patch_wise[2], y // self.patch_wise[1], x // self.patch_wise[0]
-                    )
-                    _, c, z, y, x = labels.shape
-                    orig_labels = labels.clone()
-                    labels = labels.reshape(
-                        np.prod(self.patch_wise), c, z // self.patch_wise[2], y // self.patch_wise[1], x // self.patch_wise[0]
-                    )
-
                 # runs the forward pass with autocasting if enabled
                 with autocast(enabled=self.amp_enabled):
                     # iterate through each paired sample and label and get predictions from model
                     # feeding individual samples removes the condition of gpu memory fitting whole scan
                     preds = []
+                    labels_list = []
                     val_loss = []
-                    for X, y in zip(sample, labels):
+                    for i in range(int(np.prod(self.patch_wise))):
+                        X, y = self.get_patch(i, sample.squeeze(0), labels.squeeze(0))
                         X, y = X.unsqueeze(0).to(self.device), y.unsqueeze(0).to(self.device)
                         y_hat = model(X).detach()
 
@@ -82,15 +67,12 @@ class Evaluator:
                             # apply final activation on preds
                             model.final_activation(y_hat).squeeze().cpu()
                         )
+                        labels_list.append(y.squeeze())
 
                     preds = torch.stack(preds)
+                    labels = torch.stack(labels_list)
                     val_loss = torch.stack(val_loss)
                     self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
-
-                    # combine pred patches to a single sample
-                    if self.patch_wise:
-                        preds = preds.reshape(orig_labels.shape)
-                        labels = orig_labels
 
                     # apply thresholding if it is specified
                     if self.thresholds:
@@ -122,6 +104,27 @@ class Evaluator:
                 **self.metric_list.get_results(average=True)
             }
         }
+
+    def get_patch(self, idx: int, image: torch.tensor, mask: torch.tensor) -> Tuple[torch.tensor, torch.tensor]:
+        if np.prod(self.patch_wise[:2]) == 1:  # do nothing if patch size is 1x1
+            return image, mask
+
+        # find the patch, indices for a 2x2 grid go like [0, 1; 2, 3]
+        patch_idx = idx % np.prod(self.patch_wise[:2])
+        # compute dimensions of patch
+        m, n = (image.shape[2:] / np.asarray(self.patch_wise[:2])).astype(int)
+        # find the row and column of the patch
+        r, c = patch_idx // self.patch_wise[0], patch_idx % self.patch_wise[1]
+        # handle case if patch size is a single column or row
+        r = 0 if self.patch_wise[0] == 1 else r
+        c = 0 if self.patch_wise[1] == 1 else c
+
+        # gen slice objects, could have option to add padding for overlapping patches here
+        s1 = slice(r * m, (r + 1) * m)
+        s2 = slice(c * n, (c + 1) * n)
+
+        # return the patch from image and mask
+        return image[:, :, s1, s2], mask[:, :, s1, s2]
 
     def threshold_predictions(self, preds: torch.Tensor) -> torch.Tensor:
         # below approach only translates well to binary tasks

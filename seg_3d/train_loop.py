@@ -55,11 +55,11 @@ def train(model):
         "duplicate patients in train and val split!"
 
     # get optimizer specified in config file
-    optimizer = get_optimizer(cfg)(model.parameters(), **cfg.SOLVER.PARAMS)
+    optimizer = get_optimizer(cfg.SOLVER.OPTIM)(model.parameters(), **cfg.SOLVER.PARAMS)
     scheduler = build_lr_scheduler(cfg, optimizer)
 
     # init loss criterion
-    loss = get_loss_criterion(cfg)(**cfg.LOSS.PARAMS)
+    loss = get_loss_criterion(cfg.LOSS.FN)(**cfg.LOSS.PARAMS)
     logger.info("Loss:\n{}".format(loss))
 
     # init eval metrics and evaluator
@@ -177,14 +177,18 @@ def train(model):
 
             # plot loss curve
             path = os.path.join(cfg.OUTPUT_DIR, "model_loss.png")
-            plot_loss(path, storage)
-            logger.info("Saved model loss figure at {}".format(path))
+            try:
+                plot_loss(path, storage)
+                logger.info("Saved model loss figure at {}".format(path))
+            except KeyError:
+                logger.info("Not enough metric information to plot loss, skipping...")
 
             # run final evaluation with best model
-            if cfg.TEST.FINAL_EVAL_METRICS:
+            model_checkpoint = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
+            if cfg.TEST.FINAL_EVAL_METRICS and model_checkpoint in checkpointer.get_all_checkpoint_files():
                 logger.info("Running final evaluation with best model...")
                 # load best model
-                checkpointer.load(os.path.join(cfg.OUTPUT_DIR, "model_best.pth"), checkpointables=["model"])
+                checkpointer.load(model_checkpoint, checkpointables=["model"])
 
                 # add new metrics to metric list
                 metric_list.metrics = get_metrics(cfg.TEST.FINAL_EVAL_METRICS)

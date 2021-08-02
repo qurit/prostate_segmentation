@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 import seg_3d
 from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
 from seg_3d.evaluation.evaluator import Evaluator
+from seg_3d.evaluation.mask_visualizer import MaskVisualizer
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
 from seg_3d.modeling.meta_arch.segnet import build_model
@@ -193,6 +194,12 @@ def train(model):
                 # add new metrics to metric list
                 metric_list.metrics = get_metrics(cfg.TEST.FINAL_EVAL_METRICS)
 
+                # configure mask visualizer if specified
+                if cfg.TEST.VIS_PREDS:
+                    evaluator.set_mask_visualizer(
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+                    )
+
                 # run evaluation and save metrics to a .txt file
                 with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
                     json.dump(
@@ -221,16 +228,24 @@ def run():
         logger.info("Running evaluation only!")
         Checkpointer(model, save_dir=cfg.OUTPUT_DIR).load(cfg.MODEL.WEIGHTS, checkpointables=["model"])
 
+        eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
                                       patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
+                                      joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)
 
         # init eval metrics and evaluator
         metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
         evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
                               metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
+
+        # configure mask visualizer if specified
+        if cfg.TEST.VIS_PREDS:
+            evaluator.set_mask_visualizer(
+                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+            )
 
         results = evaluator.evaluate(model)
         # save inference results

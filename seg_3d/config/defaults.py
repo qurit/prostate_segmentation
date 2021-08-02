@@ -96,6 +96,9 @@ _C.TEST.EVAL_METRICS = []
 _C.TEST.FINAL_EVAL_METRICS = []  # metrics to compute for the final eval step at the end of training
 _C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation
 _C.TEST.THRESHOLDS = None
+# option to visualize predictions using the mask visualizer
+# if in training mode, will only visualize masks at the end of the main train loop
+_C.TEST.VIS_PREDS = False
 
 # -----------------------------------------------------------------------------
 # PIPELINE MODES

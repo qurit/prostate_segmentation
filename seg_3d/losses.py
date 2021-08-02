@@ -205,11 +205,12 @@ class MultiLoss(nn.Module):
 
     def __init__(self, losses: List[Tuple[str, dict]], weights: List[float] = None):
         """
-
         Args:
             losses: List of tuples where the first value is a loss registered in the LOSS REGISTRY
                     and the second value is a dictionary containing the params
-                    E.g. [('DiceLoss':{}), ('BCELoss',{'class_weight':[0,1,2]})]
+                    E.g. [('DiceLoss',{}),
+                          ('BCEWithLogitsLoss',{}),  # this loss is from torch.nn
+                          ('GeneralizedDiceLoss',{'normalization':'softmax'}]
             weights: Weight applied to each loss specified in kwargs, must be same length as kwargs
         """
         super(MultiLoss, self).__init__()
@@ -421,6 +422,12 @@ class SkipLastTargetChannelWrapper(nn.Module):
             target = torch.squeeze(target, dim=1)
         return self.loss(input, target)
 
+
+# register all losses from torch.nn to LOSS registry
+dir_loss = dir(torch.nn)
+losses = [item for item in dir_loss if "Loss" in item]
+for loss in losses:
+    LOSS_REGISTRY.register(eval("torch.nn." + loss))
 
 # register all optim from torch.optim to a registry
 OPTIM_REGISTRY = Registry('OPTIM')

@@ -120,7 +120,8 @@ class ImageToImage3D(Dataset):
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
                  joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None,
-                 patch_wise: Tuple[int] = None, **kwargs) -> None:
+                 patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None,
+                 patch_halo: Tuple[int] = None, **kwargs) -> None:
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
@@ -132,10 +133,9 @@ class ImageToImage3D(Dataset):
         self.slice_shape = slice_shape
         self.crop_size = crop_size
         self.num_patients = num_patients  # used for train-val-test split
-        self.patch_wise = patch_wise  # non-overlapping patch-wise training, number of patches in each dim (x, y, z)
-        dummy_img = torch.ones((1,100,200,200))
-        dummy_lab = torch.ones((2,100,200,200))
-        self.slicer = SliceBuilder([dummy_img], [dummy_lab], (100,128,128),(100,72,72), None)
+        self.patch_size = patch_size
+        self.patch_stride = patch_stride
+        self.patch_halo = patch_halo
         self.logger = logging.getLogger(__name__)
 
         if type(dataset_path) is str:
@@ -175,18 +175,25 @@ class ImageToImage3D(Dataset):
         self.joint_transform = joint_transform
 
         # if dataset is used during evaluation/testing then disable patch-wise during data fetching
-        if self.joint_transform.test or self.patch_wise is None:
-            self.patch_wise = (1, 1, 1)
+        self.patch_wise = not self.joint_transform.test
+       
+        if self.patch_wise and self.patch_size is not None:
+            dummy_img = torch.ones((1,self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
+            dummy_msk = torch.ones((len(self.class_labels), self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
+            self.slicer = SliceBuilder([dummy_img], [dummy_msk], self.patch_size,self.patch_stride, None)
+        else:
+            self.slicer = None
+
 
     def __len__(self) -> int:
-        if not self.joint_transform.test:
+        if self.patch_wise and self.patch_size is not None:
             return len(self.patient_keys) * len(self.slicer.raw_slices)
         else:
             return len(self.patient_keys)
 
     def __getitem__(self, idx) -> dict:
         # divide index by number of patches to get patient idx
-        if not self.joint_transform.test:
+        if self.patch_wise and self.patch_size is not None:
             patient = list(self.patient_keys)[idx // len(self.slicer.raw_slices)]
         else:
             patient = list(self.patient_keys)[idx]
@@ -243,14 +250,6 @@ class ImageToImage3D(Dataset):
         # need to have same tensor shape across samples in batch
         image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
 
-        # # from remaining slices get the range of slices for particular patch
-        # if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:
-        #     patch_idx = idx % self.patch_wise[2]
-        #     size = len(image[0]) // self.patch_wise[2]
-        #     slice_range = slice(patch_idx * size, (patch_idx + 1) * size)  # could have option to add padding for overlapping patches here
-        #     image, mask = image[:, slice_range], mask[:, slice_range]
-
-        # apply centre crop
         if self.crop_size is not None:
             image = centre_crop(image, (*image.shape[:2], *self.crop_size))
             mask = centre_crop(mask, (*mask.shape[:2], *self.crop_size))
@@ -261,7 +260,7 @@ class ImageToImage3D(Dataset):
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
 
-        if not self.joint_transform.test:
+        if self.patch_wise and self.patch_size is not None:
 
             patch_idx = idx % len(self.slicer.raw_slices)
 
@@ -269,10 +268,7 @@ class ImageToImage3D(Dataset):
             patch_lab_slice = self.slicer.label_slices[patch_idx]
 
             image, mask = image[patch_im_slice], mask[patch_lab_slice]
-
-        # # get patch
-        # image, mask = self.get_patch(idx, image, mask)
-
+    
         return {
             "orig_image": orig_image,
             "image": image.float(),

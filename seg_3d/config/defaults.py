@@ -36,7 +36,12 @@ _C.DATASET.TEST_PATIENT_KEYS = None
 _C.DATASET.PARAMS.modality_roi_map = [{"CT": ["Bladder"]}]
 _C.DATASET.PARAMS.num_slices = None  # number of slices in axial plane, if None then selects shortest scan length from dataset
 _C.DATASET.PARAMS.crop_size = None  # size of centre crop, if None then no centre cropping done
-_C.DATASET.PARAMS.patch_wise = None # Number of patches to split each dimension into; no patches would be (1,1,1)
+
+_C.DATASET.PARAMS.patch_size = None # 3 dim tuple for patch size
+_C.DATASET.PARAMS.patch_stride = None # 3 dim tuple for patch stride (how far to move between patches)
+_C.DATASET.PARAMS.patch_halo = None # 3 dim tuple for size of halo to be removed from patches
+_C.DATASET.PARAMS.patching_input_size = None # Tuple describing original image input size before patching
+_C.DATASET.PARAMS.patching_label_size = None # Tuple describing original labels/mask size before patching
 
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 

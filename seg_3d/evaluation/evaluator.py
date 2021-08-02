@@ -14,8 +14,10 @@ from seg_3d.evaluation.metrics import MetricList, argmax_dice_score
 
 class Evaluator:
     def __init__(self, device: str, dataset: ImageToImage3D, metric_list: MetricList, loss: Callable = None,
-                 thresholds: List[float] = None, amp_enabled: bool = False, patch_wise: Tuple[int] = None,
-                 num_workers: int = 0):
+                 thresholds: List[float] = None, amp_enabled: bool = False, num_workers: int = 0, 
+                 patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None, patch_halo: Tuple[int] = None,
+                 patching_input_size: Tuple[int] = None, patching_label_size: Tuple[int] = None, **kwargs):
+
         self.device = device
         self.dataset = dataset
         self.metric_list = metric_list
@@ -24,15 +26,19 @@ class Evaluator:
         self.amp_enabled = amp_enabled
         self.num_workers = num_workers
         self.logger = logging.getLogger(__name__)
-        dummy_img = torch.ones((1,100,200,200))
-        dummy_lab = torch.ones((2,100,200,200))
-        self.slicer = SliceBuilder([dummy_img], [dummy_lab], (100,128,128),(100,72,72), None)
 
-        # if patch_wise is not None and np.prod(patch_wise) != 1:
-        if patch_wise is not None:
-            self.patch_wise = patch_wise
+        self.patch_size = patch_size
+        self.patch_stride = patch_stride
+        self.patch_halo = patch_halo
+        self.patch_input_size = patching_input_size
+        self.patch_label_size = patching_label_size
+
+        if self.patch_size is not None:
+            dummy_img = torch.ones(self.patch_input_size)
+            dummy_msk = torch.ones(self.patch_label_size)
+            self.slicer = SliceBuilder([dummy_img], [dummy_msk], self.patch_size, self.patch_stride, None)
         else:
-            self.patch_wise = (1,1,1)
+            self.slicer = None
 
     def evaluate(self, model):
         self.logger.info("Starting evaluation on dataset of size {}...".format(len(self.dataset)))
@@ -43,8 +49,6 @@ class Evaluator:
 
         inference_dict = {}
         with torch.no_grad():
-            
-            f_dice_scores = []
 
             for idx, data_input in tqdm.tqdm(enumerate(DataLoader(self.dataset, batch_size=1, num_workers=self.num_workers)),
                                              total=len(self.dataset), desc="[evaluation progress =>]"):
@@ -52,72 +56,68 @@ class Evaluator:
                 sample = data_input["image"]  # shape is (batch, channel, depth, height, width)
                 labels = data_input["gt_mask"]
 
+                val_loss = []
+
                 # runs the forward pass with autocasting if enabled
                 with autocast(enabled=self.amp_enabled):
-                    # if np.prod(self.patch_wise) != 1:
-                    #     fX, fy = sample.clone().to(self.device), labels.clone().to(self.device)
-                    #     y_full = model(fX).detach()
-                    #     _ = self.loss(y_full, fy)
-                    #     f_dice = argmax_dice_score(y_full, fy)
-                    #     f_dice_scores.append(f_dice)
 
-                    # iterate through each paired sample and label and get predictions from model
-                    # feeding individual samples removes the condition of gpu memory fitting whole scan
-                    preds = []
-                    labels_list = []
-                    val_loss = []
-                    predmap = torch.zeros_like(labels).to(self.device)
-                    normmap = torch.zeros_like(labels).to(self.device)
+                    if self.slicer is not None:
 
-                    for i in range(len(self.slicer.raw_slices)):
-                        X, y = sample.squeeze(0)[self.slicer.raw_slices[i]], labels.squeeze(0)[self.slicer.label_slices[i]]
-                        X, y = X.unsqueeze(0).to(self.device), y.unsqueeze(0).to(self.device)
-                        y_hat = model(X).detach()
-                        
-                        index = self.slicer.raw_slices[i]
-                        # index = (slice(0,2,None), ) + index[1:]
-                        y_act = model.final_activation(y_hat)
-                        u_prediction, u_index = self.remove_halo(y_act.squeeze(), index, sample.shape[2:], (0,28,28))
-                        u_index = (slice(0,1, None), slice(0,2,None)) + u_index[1:]
+                        preds = torch.zeros_like(labels).to(self.device)
+                        norms = torch.zeros_like(labels).to(self.device)
 
-                        predmap[u_index] += u_prediction
-                        normmap[u_index] += 1
+                        patient_val_loss = []
+
+                        for i in range(len(self.slicer.raw_slices)):
+                            X, y = sample.squeeze(0)[self.slicer.raw_slices[i]], labels.squeeze(0)[self.slicer.label_slices[i]]
+                            X, y = X.unsqueeze(0).to(self.device), y.unsqueeze(0).to(self.device)
+                            
+                            y_hat = model(X).detach()
+                            y_act = model.final_activation(y_hat)
+
+                            u_prediction, u_index = self.remove_halo(y_act.squeeze(), self.slicer.raw_slices[i], sample.shape[2:], self.patch_halo)
+                            
+                            u_index = (slice(0,1, None), slice(0,2,None)) + u_index[1:]
+
+                            preds[u_index] += u_prediction
+                            norms[u_index] += 1
+
+                            if self.loss:
+                                L = self.loss(y_hat, y)
+                                if type(L) is dict:
+                                    L = sum(L.values())
+                                val_loss.append(L)
+
+                        val_loss = torch.stack(val_loss)
+                        self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
+
+                    else:
+
+                        preds = model(sample).detach()
 
                         if self.loss:
-                            L = self.loss(y_hat, y)
+                            L = self.loss(preds, labels.to(self.device))
                             if type(L) is dict:
                                 L = sum(L.values())
-                            val_loss.append(L)
 
-                        # preds.append(
-                        #     # apply final activation on preds
-                        #     model.final_activation(y_hat).squeeze().cpu()
-                        # )
-                        # labels_list.append(y.squeeze())
+                        # apply final activation on preds
+                        preds = model.final_activation(preds)
                     
-                    # preds = torch.stack(preds)
-                    #labels = torch.stack(labels_list)
-                    val_loss = torch.stack(val_loss)
-                    self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
+                        self.metric_list.results["val_loss"].append(L)
 
                     # apply thresholding if it is specified
                     if self.thresholds:
                         preds[:] = self.threshold_predictions(preds.squeeze(1))
-
-                    self.metric_list(predmap, labels)
+                    self.metric_list(preds, labels)
 
                     # print out results for patient
                     self.logger.info("results for patient {}:".format(patient))
-                    print('YOOOOO', idx)
                     patient_metrics = self.metric_list.get_results_idx(idx)
                     for key in patient_metrics:
                         self.logger.info("{}: {}".format(key, patient_metrics[key]))
-                    
-                    # if np.prod(self.patch_wise) != 1:
-                    #     self.logger.info("results for full scan {}:".format(f_dice))
 
                     inference_dict[patient] = {"gt": labels.cpu().numpy(),
-                                               "preds": predmap,#preds.cpu().numpy(),
+                                               "preds": preds.cpu().numpy(),
                                                "image": data_input["image"].numpy(),
                                                "metrics": patient_metrics}
 
@@ -126,37 +126,13 @@ class Evaluator:
 
         self.logger.info("Inference done! Mean metric scores:")
         self.logger.info(json.dumps(averaged_results, indent=4))
-        # if np.prod(self.patch_wise) != 1:
-        #     self.logger.info('argmax dice scores full scan: {}'.format(np.mean(np.asarray(f_dice_scores), axis=0)))
 
-        # return inference dict and averaged results
         return {
             "inference": inference_dict,
             "metrics": {
                 **self.metric_list.get_results(average=True)
             }
         }
-
-    def get_patch(self, idx: int, image: torch.tensor, mask: torch.tensor) -> Tuple[torch.tensor, torch.tensor]:
-        if np.prod(self.patch_wise[:2]) == 1:  # do nothing if patch size is 1x1
-            return image, mask
-
-        # find the patch, indices for a 2x2 grid go like [0, 1; 2, 3]
-        patch_idx = idx % np.prod(self.patch_wise[:2])
-        # compute dimensions of patch
-        m, n = (image.shape[2:] / np.asarray(self.patch_wise[:2])).astype(int)
-        # find the row and column of the patch
-        r, c = patch_idx // self.patch_wise[0], patch_idx % self.patch_wise[1]
-        # handle case if patch size is a single column or row
-        r = 0 if self.patch_wise[0] == 1 else r
-        c = 0 if self.patch_wise[1] == 1 else c
-
-        # gen slice objects, could have option to add padding for overlapping patches here
-        s1 = slice(r * m, (r + 1) * m)
-        s2 = slice(c * n, (c + 1) * n)
-
-        # return the patch from image and mask
-        return image[:, :, s1, s2], mask[:, :, s1, s2]
 
     def threshold_predictions(self, preds: torch.Tensor) -> torch.Tensor:
         # below approach only translates well to binary tasks

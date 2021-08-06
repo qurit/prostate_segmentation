@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import pickle
+import random
 from time import time
 
 import numpy as np
@@ -13,7 +14,6 @@ from torch.utils.data import DataLoader
 import seg_3d
 from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
 from seg_3d.evaluation.evaluator import Evaluator
-from seg_3d.evaluation.mask_visualizer import MaskVisualizer
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
 from seg_3d.modeling.meta_arch.segnet import build_model
@@ -22,7 +22,7 @@ from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.seg_utils import seed_all, TrainingSampler, plot_loss
+from seg_3d.utils.seg_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
 
@@ -98,8 +98,10 @@ def train(model):
             # start main training loop
             for iteration, batched_inputs in zip(
                     range(start_iter, max_iter),
-                    DataLoader(train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH, num_workers=cfg.NUM_WORKERS,
-                               sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
+                    DataLoader(
+                        train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+                        num_workers=cfg.NUM_WORKERS, worker_init_fn=random.seed(cfg.SEED),
+                        sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
             ):
 
                 storage.iter = iteration
@@ -212,6 +214,9 @@ def run():
     with PathManager().open(path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(path))
+
+    # save zipped up code to output dir
+    zip_files_in_dir(seg_3d.__name__, zip_file_name=os.path.join(cfg.OUTPUT_DIR, "code.zip"))
 
     # make training deterministic
     seed_all(cfg.SEED)

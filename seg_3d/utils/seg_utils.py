@@ -1,7 +1,9 @@
 # original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/utils.py
 # Copyright (c) 2018 Adrian Wolny
+import os
 import random
 from typing import Optional
+from zipfile import ZipFile
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,7 +16,7 @@ def seed_all(seed):
     random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = True  # set to True if inputs are the same size during training
     torch.backends.cudnn.deterministic = True  # may result in a slowdown if set to True
 
 
@@ -137,3 +139,25 @@ class TrainingSampler(Sampler):
                 yield from torch.randperm(self._size, generator=g).tolist()
             else:
                 yield from torch.arange(self._size).tolist()
+
+
+def zip_files_in_dir(dir_name, zip_file_name, to_ignore=None):
+    # original code from
+    # https://thispointer.com/python-how-to-create-a-zip-archive-from-multiple-files-or-directory/
+    if to_ignore is None:
+        to_ignore = ["__pycache__", "output"]  # by default ignore these directories
+    filter_fn = lambda name: all(
+        item not in name for item in to_ignore
+    )
+
+    with ZipFile(zip_file_name, 'w') as zip_obj:
+        # Iterate over all the files in directory
+        for folder_name, subfolders, filenames in os.walk(dir_name):
+            if filter_fn(folder_name):
+                for filename in filenames:
+                    if filter_fn(filename):
+                        # create complete filepath of file in directory
+                        filePath = os.path.join(folder_name, filename)
+                        # Add file to zip
+                        zip_obj.write(filePath, filePath)
+

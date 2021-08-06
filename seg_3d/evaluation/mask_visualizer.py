@@ -198,7 +198,7 @@ class MaskVisualizer:
 
                     # make RGBA array for pred
                     pred_im = np.zeros(y_hat.shape + (4,))
-                    if y_hat[y_hat > 0.5].sum() != 0:
+                    if y_hat.sum() != 0:
                         pred_im[:, :, 3] = y_hat
                         pred_im[:, :, :3] = cm.get_cmap(self.pred_cmap_dict[label])(y_hat)[:, :, :3]
 

@@ -102,11 +102,10 @@ class Evaluator:
                             L = self.loss(preds, labels.to(self.device))
                             if type(L) is dict:
                                 L = sum(L.values())
+                            self.metric_list.results["val_loss"].append(L)
 
                         # apply final activation on preds
                         preds = model.final_activation(preds)
-                    
-                        self.metric_list.results["val_loss"].append(L)
 
                     # apply thresholding if it is specified
                     if self.thresholds:

@@ -145,19 +145,20 @@ class MaskVisualizer:
 
                 # init RGBA array
                 gt_im = np.zeros(y.shape + (4,))
-                # set the transparency to 0 for pixels which have a prediction of 0
                 if y.sum() != 0:
+                    # set the transparency to 0 for pixels which have a prediction of 0
                     gt_im[:, :, 3] = y
-                    y_norm = y * (j + 1) / len(gt)  # ensures a different color for each roi
                     # fill in the RGB values
-                    gt_im[:, :, :3] = cm.get_cmap(self.gt_cmap)(y_norm)[:, :, :3]
+                    # multiply the values by some factor (e.g. 0.5) so they
+                    # are a shade different than the mask predictions
+                    gt_im[:, :, :3] = cm.get_cmap(self.pred_cmap_dict[label])(y * 0.5)[:, :, :3]
 
                     # add sum to legend if specified
-                    if show_slice_scores:
-                        label += ": {:.0f}".format(y.sum())
+                    leg_label = label + ": {:.0f}".format(y.sum()) if show_slice_scores else label
 
+                    # add patch for legend
                     gt_patches.append(
-                        mpatches.Patch(color=list(cm.get_cmap(self.gt_cmap)(y_norm[y_norm != 0][0])), label=label)
+                        mpatches.Patch(color=list(cm.get_cmap(self.pred_cmap_dict[label])(0.5)), label=leg_label)
                     )
                 gt_images.append(gt_im)
 
@@ -166,7 +167,7 @@ class MaskVisualizer:
 
             # add title and legend
             axs[a, b].set_title("Ground Truth Mask")
-            axs[a, b].legend(handles=gt_patches, loc=4)  # loc=1 for upper right
+            axs[a, b].legend(handles=gt_patches, loc="best")  # loc=1 for upper right
 
             pred_patches = []  # for legend
             # iterate through each algorithm and its set of predictions
@@ -188,10 +189,11 @@ class MaskVisualizer:
                 if gt_overlay:
                     pred_alpha = .8
                     for gt_im in gt_images:
+                        # gt_im[:, :, :3] *= 0  # make gt all black
                         axs[a, b].imshow(gt_im, interpolation="none", alpha=0.5)
 
                 # iterate through each channel in the pred
-                for k, (y_hat, y, label) in enumerate(zip(pred, gt, self.class_labels)):
+                for _, (y_hat, y, label) in enumerate(zip(pred, gt, self.class_labels)):
                     # apply centre cropping as a post processing step
                     y_hat = centre_crop(y_hat, self.crop_size)
                     y = centre_crop(y[i], self.crop_size)
@@ -219,7 +221,7 @@ class MaskVisualizer:
 
             fig.suptitle("%s Order: %.0f" % (patient, i))
             # add legend for the prediction masks
-            plt.legend(handles=pred_patches, loc=4)
+            plt.legend(handles=pred_patches, loc="best")
             # adjust spacing
             plt.tight_layout()
             plt.subplots_adjust(top=0.90)

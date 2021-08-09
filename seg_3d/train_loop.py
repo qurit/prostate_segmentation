@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import pickle
+import random
 from time import time
 
 import numpy as np
@@ -21,7 +22,7 @@ from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.seg_utils import seed_all, TrainingSampler, plot_loss
+from seg_3d.utils.seg_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
 
@@ -55,11 +56,11 @@ def train(model):
         "duplicate patients in train and val split!"
 
     # get optimizer specified in config file
-    optimizer = get_optimizer(cfg)(model.parameters(), **cfg.SOLVER.PARAMS)
+    optimizer = get_optimizer(cfg.SOLVER.OPTIM)(model.parameters(), **cfg.SOLVER.PARAMS)
     scheduler = build_lr_scheduler(cfg, optimizer)
 
     # init loss criterion
-    loss = get_loss_criterion(cfg)(**cfg.LOSS.PARAMS)
+    loss = get_loss_criterion(cfg.LOSS.FN)(**cfg.LOSS.PARAMS)
     logger.info("Loss:\n{}".format(loss))
 
     # init eval metrics and evaluator
@@ -97,8 +98,10 @@ def train(model):
             # start main training loop
             for iteration, batched_inputs in zip(
                     range(start_iter, max_iter),
-                    DataLoader(train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH, num_workers=cfg.NUM_WORKERS,
-                               sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
+                    DataLoader(
+                        train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+                        num_workers=cfg.NUM_WORKERS, worker_init_fn=random.seed(cfg.SEED),
+                        sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
             ):
 
                 storage.iter = iteration
@@ -177,17 +180,27 @@ def train(model):
 
             # plot loss curve
             path = os.path.join(cfg.OUTPUT_DIR, "model_loss.png")
-            plot_loss(path, storage)
-            logger.info("Saved model loss figure at {}".format(path))
+            try:
+                plot_loss(path, storage)
+                logger.info("Saved model loss figure at {}".format(path))
+            except KeyError:
+                logger.info("Not enough metric information to plot loss, skipping...")
 
             # run final evaluation with best model
-            if cfg.TEST.FINAL_EVAL_METRICS:
+            model_checkpoint = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
+            if cfg.TEST.FINAL_EVAL_METRICS and model_checkpoint in checkpointer.get_all_checkpoint_files():
                 logger.info("Running final evaluation with best model...")
                 # load best model
-                checkpointer.load(os.path.join(cfg.OUTPUT_DIR, "model_best.pth"), checkpointables=["model"])
+                checkpointer.load(model_checkpoint, checkpointables=["model"])
 
                 # add new metrics to metric list
                 metric_list.metrics = get_metrics(cfg.TEST.FINAL_EVAL_METRICS)
+
+                # configure mask visualizer if specified
+                if cfg.TEST.VIS_PREDS:
+                    evaluator.set_mask_visualizer(
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+                    )
 
                 # run evaluation and save metrics to a .txt file
                 with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
@@ -201,6 +214,9 @@ def run():
     with PathManager().open(path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(path))
+
+    # save zipped up code to output dir
+    zip_files_in_dir(seg_3d.__name__, zip_file_name=os.path.join(cfg.OUTPUT_DIR, "code.zip"))
 
     # make training deterministic
     seed_all(cfg.SEED)
@@ -217,16 +233,24 @@ def run():
         logger.info("Running evaluation only!")
         Checkpointer(model, save_dir=cfg.OUTPUT_DIR).load(cfg.MODEL.WEIGHTS, checkpointables=["model"])
 
+        eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
                                       patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
+                                      joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)
 
         # init eval metrics and evaluator
         metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
         evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
                               metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
+
+        # configure mask visualizer if specified
+        if cfg.TEST.VIS_PREDS:
+            evaluator.set_mask_visualizer(
+                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+            )
 
         results = evaluator.evaluate(model)
         # save inference results

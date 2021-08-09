@@ -5,6 +5,8 @@ from scipy import ndimage
 
 
 def centre_crop(img, bounding):
+    if bounding is None:
+        return img
     start = tuple(map(lambda a, da: a//2-da//2, img.shape, bounding))
     end = tuple(map(operator.add, start, bounding))
     slices = tuple(map(slice, start, end))

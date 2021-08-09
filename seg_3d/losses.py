@@ -1,7 +1,6 @@
 # original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/losses.py
 import logging
-# from seg_3d.evaluation.metrics import ssim
-from typing import Dict
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -272,6 +271,53 @@ class BCEDiceSSIMLoss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
+class MultiLoss(nn.Module):
+    """Linear combination of an arbitrary number of losses"""
+
+    def __init__(self, losses: List[Tuple[str, dict]], weights: List[float] = None):
+        """
+        Args:
+            losses: List of tuples where the first value is a loss registered in the LOSS REGISTRY
+                    and the second value is a dictionary containing the params
+                    E.g. [('DiceLoss',{}),
+                          ('BCEWithLogitsLoss',{}),  # this loss is from torch.nn
+                          ('GeneralizedDiceLoss',{'normalization':'softmax'}]
+            weights: Weight applied to each loss specified in kwargs, must be same length as kwargs
+        """
+        super(MultiLoss, self).__init__()
+        # if no weights specified then just set all weights to 1
+        if not weights:
+            weights = [1] * len(losses)
+        self.register_buffer("weights", torch.as_tensor(weights))
+
+        # initialize each loss from kwargs
+        self.losses = {}
+        for loss_name, params in losses:
+            L = get_loss_criterion(loss_name)(**params)
+            self.losses[loss_name] = L
+            setattr(self, loss_name, L)
+
+        self.logger = logging.getLogger(__name__)
+
+    def forward(self, input, target) -> Dict[str, torch.Tensor]:
+        results = {}
+        # call forward for each loss
+        for idx, loss_name in enumerate(self.losses):
+            L = self.losses[loss_name](input, target)
+            # check if result is a dict
+            if type(L) is dict:
+                # apply weighting to each value of dict and update results dict
+                results = {
+                    **results, **{k: self.weights[idx] * v for k, v in L.items()}
+                }
+            else:
+                # apply weighting and update results dict
+                results[loss_name] = self.weights[idx] * L
+
+        return results
+
+
+@LOSS_REGISTRY.register()
 class WeightedCrossEntropyLoss(nn.Module):
     """WeightedCrossEntropyLoss (WCE) as described in https://arxiv.org/pdf/1707.03237.pdf
     """
@@ -353,8 +399,8 @@ class WeightedSmoothL1Loss(nn.SmoothL1Loss):
 
 
 # HELPERS #
-def get_loss_criterion(config):
-    return LOSS_REGISTRY.get(config.LOSS.FN)
+def get_loss_criterion(loss: str):
+    return LOSS_REGISTRY.get(loss)
 
 
 def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
@@ -447,6 +493,7 @@ class SkipLastTargetChannelWrapper(nn.Module):
             target = torch.squeeze(target, dim=1)
         return self.loss(input, target)
 
+@LOSS_REGISTRY.register()
 class SSIM(torch.nn.Module):
     def __init__(self, window_size = 11, size_average = True):
         super(SSIM, self).__init__()
@@ -508,13 +555,19 @@ class SSIM(torch.nn.Module):
         return self._ssim(img1, img2, window, self.window_size, channel, self.size_average)
 
 
+# register all losses from torch.nn to LOSS registry
+dir_loss = dir(torch.nn)
+losses = [item for item in dir_loss if "Loss" in item]
+for loss in losses:
+    LOSS_REGISTRY.register(eval("torch.nn." + loss))
+
 # register all optim from torch.optim to a registry
 OPTIM_REGISTRY = Registry('OPTIM')
 dir_optim = dir(torch.optim)
 optims = [item for item in dir_optim if item[0].isupper()]
-for optim in optims:
-    OPTIM_REGISTRY.register(eval("torch.optim." + optim))
+for o in optims:
+    OPTIM_REGISTRY.register(eval("torch.optim." + o))
 
 
-def get_optimizer(config):
-    return OPTIM_REGISTRY.get(config.SOLVER.OPTIM)
+def get_optimizer(optim: str):
+    return OPTIM_REGISTRY.get(optim)

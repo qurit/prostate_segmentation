@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from seg_3d.data.dataset import ImageToImage3D, SliceBuilder
 from seg_3d.evaluation.metrics import MetricList, argmax_dice_score
+from seg_3d.evaluation.mask_visualizer import MaskVisualizer
 
 
 class Evaluator:
@@ -25,6 +26,7 @@ class Evaluator:
         self.thresholds = thresholds
         self.amp_enabled = amp_enabled
         self.num_workers = num_workers
+        self.mask_visualizer = None
         self.logger = logging.getLogger(__name__)
 
         self.patch_size = patch_size
@@ -88,8 +90,9 @@ class Evaluator:
                                     L = sum(L.values())
                                 val_loss.append(L)
 
-                        val_loss = torch.stack(val_loss)
-                        self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
+                        if self.loss:
+                            val_loss = torch.stack(val_loss)
+                            self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
 
                     else:
 
@@ -108,6 +111,7 @@ class Evaluator:
                     # apply thresholding if it is specified
                     if self.thresholds:
                         preds[:] = self.threshold_predictions(preds.squeeze(1))
+
                     self.metric_list(preds, labels)
 
                     # print out results for patient
@@ -116,10 +120,21 @@ class Evaluator:
                     for key in patient_metrics:
                         self.logger.info("{}: {}".format(key, patient_metrics[key]))
 
-                    inference_dict[patient] = {"gt": labels.cpu().numpy(),
-                                               "preds": preds.cpu().numpy(),
-                                               "image": data_input["image"].numpy(),
+                    # make sure all tensors are on cpu and convert to npy arrays
+                    labels = labels.cpu().numpy()
+                    preds = preds.cpu().numpy()
+                    image = data_input["image"].cpu().numpy()
+
+                    inference_dict[patient] = {"gt": labels,
+                                               "preds": preds,
+                                               "image": image,
                                                "metrics": patient_metrics}
+
+                    # plot mask predictions if specified
+                    if self.mask_visualizer:
+                        self.mask_visualizer.plot_mask_predictions(
+                            patient, image.squeeze(0), preds.squeeze(0), labels.squeeze(0), skip_bkg=True
+                        )
 
         model.train()
         averaged_results = (self.metric_list.get_results(average=True))
@@ -136,9 +151,9 @@ class Evaluator:
 
     def threshold_predictions(self, preds: torch.Tensor) -> torch.Tensor:
         # below approach only translates well to binary tasks
-        # TODO: improve for multi class case
+        # TODO: improve for multi class case, maybe just argmax?
         new_preds = [
-            torch.where(pred >= thres, pred, torch.zeros_like(pred))
+            torch.where(pred >= thres, torch.ones_like(pred), torch.zeros_like(pred))
             for thres, pred in zip(self.thresholds, preds)
         ]
 
@@ -180,3 +195,6 @@ class Evaluator:
         patch_index = (p_c, p_z, p_y, p_x)
         index = (i_c, i_z, i_y, i_x)
         return patch[patch_index], index
+
+    def set_mask_visualizer(self, class_labels, plot_dir):
+        self.mask_visualizer = MaskVisualizer(class_labels=class_labels, root_plot_dir=plot_dir, save_figs=True)

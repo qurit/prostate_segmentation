@@ -120,7 +120,8 @@ class ImageToImage3D(Dataset):
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
                  joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None,
-                 patch_wise: Tuple[int] = None, **kwargs) -> None:
+                 patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None,
+                 patch_halo: Tuple[int] = None, **kwargs) -> None:
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
@@ -132,7 +133,9 @@ class ImageToImage3D(Dataset):
         self.slice_shape = slice_shape
         self.crop_size = crop_size
         self.num_patients = num_patients  # used for train-val-test split
-        self.patch_wise = patch_wise  # non-overlapping patch-wise training, number of patches in each dim (x, y, z)
+        self.patch_size = patch_size
+        self.patch_stride = patch_stride
+        self.patch_halo = patch_halo
         self.logger = logging.getLogger(__name__)
 
         if type(dataset_path) is str:
@@ -172,15 +175,29 @@ class ImageToImage3D(Dataset):
         self.joint_transform = joint_transform
 
         # if dataset is used during evaluation/testing then disable patch-wise during data fetching
-        if self.joint_transform.test or self.patch_wise is None:
-            self.patch_wise = (1, 1, 1)
+        self.patch_wise = not self.joint_transform.test
+       
+        if self.patch_wise and self.patch_size is not None:
+            dummy_img = torch.ones((1,self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
+            dummy_msk = torch.ones((len(self.class_labels), self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
+            self.slicer = SliceBuilder([dummy_img], [dummy_msk], self.patch_size,self.patch_stride, None)
+        else:
+            self.slicer = None
+
 
     def __len__(self) -> int:
-        return len(self.patient_keys) * np.prod(self.patch_wise)
+        if self.patch_wise and self.patch_size is not None:
+            return len(self.patient_keys) * len(self.slicer.raw_slices)
+        else:
+            return len(self.patient_keys)
 
     def __getitem__(self, idx) -> dict:
         # divide index by number of patches to get patient idx
-        patient = list(self.patient_keys)[idx // np.prod(self.patch_wise)]
+        if self.patch_wise and self.patch_size is not None:
+            patient = list(self.patient_keys)[idx // len(self.slicer.raw_slices)]
+        else:
+            patient = list(self.patient_keys)[idx]
+
         patient_dir = self.all_patient_fps[patient]
 
         # read image
@@ -233,14 +250,6 @@ class ImageToImage3D(Dataset):
         # need to have same tensor shape across samples in batch
         image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
 
-        # from remaining slices get the range of slices for particular patch
-        if len(self.patch_wise) > 2 and self.patch_wise[2] != 1:
-            patch_idx = idx % self.patch_wise[2]
-            size = len(image[0]) // self.patch_wise[2]
-            slice_range = slice(patch_idx * size, (patch_idx + 1) * size)  # could have option to add padding for overlapping patches here
-            image, mask = image[:, slice_range], mask[:, slice_range]
-
-        # apply centre crop
         if self.crop_size is not None:
             image = centre_crop(image, (*image.shape[:2], *self.crop_size))
             mask = centre_crop(mask, (*mask.shape[:2], *self.crop_size))
@@ -251,9 +260,15 @@ class ImageToImage3D(Dataset):
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
 
-        # get patch
-        image, mask = self.get_patch(idx, image, mask)
+        if self.patch_wise and self.patch_size is not None:
 
+            patch_idx = idx % len(self.slicer.raw_slices)
+
+            patch_im_slice = self.slicer.raw_slices[patch_idx]
+            patch_lab_slice = self.slicer.label_slices[patch_idx]
+
+            image, mask = image[patch_im_slice], mask[patch_lab_slice]
+    
         return {
             "orig_image": orig_image,
             "image": image.float(),
@@ -338,6 +353,98 @@ class ImageToImage3D(Dataset):
 
         # update tumor mask in the mask dict
         mask["Tumor"] = tumor_mask
+
+class SliceBuilder:
+    """
+    Builds the position of the patches in a given raw/label/weight ndarray based on the the patch and stride shape
+    """
+
+    def __init__(self, raw_datasets, label_datasets, patch_shape, stride_shape, weight_dataset, **kwargs):
+        """
+        :param raw_datasets: ndarray of raw data
+        :param label_datasets: ndarray of ground truth labels
+        :param patch_shape: the shape of the patch DxHxW
+        :param stride_shape: the shape of the stride DxHxW
+        :param weight_dataset: ndarray of weights for the labels
+        :param kwargs: additional metadata
+        """
+
+        patch_shape = tuple(patch_shape)
+        stride_shape = tuple(stride_shape)
+        skip_shape_check = kwargs.get('skip_shape_check', False)
+        if not skip_shape_check:
+            self._check_patch_shape(patch_shape)
+
+        self._raw_slices = self._build_slices(raw_datasets[0], patch_shape, stride_shape)
+        if label_datasets is None:
+            self._label_slices = None
+        else:
+            # take the first element in the label_datasets to build slices
+            self._label_slices = self._build_slices(label_datasets[0], patch_shape, stride_shape)
+            assert len(self._raw_slices) == len(self._label_slices)
+        if weight_dataset is None:
+            self._weight_slices = None
+        else:
+            self._weight_slices = self._build_slices(weight_dataset[0], patch_shape, stride_shape)
+            assert len(self.raw_slices) == len(self._weight_slices)
+
+    @property
+    def raw_slices(self):
+        return self._raw_slices
+
+    @property
+    def label_slices(self):
+        return self._label_slices
+
+    @property
+    def weight_slices(self):
+        return self._weight_slices
+
+    @staticmethod
+    def _build_slices(dataset, patch_shape, stride_shape):
+        """Iterates over a given n-dim dataset patch-by-patch with a given stride
+        and builds an array of slice positions.
+        Returns:
+            list of slices, i.e.
+            [(slice, slice, slice, slice), ...] if len(shape) == 4
+            [(slice, slice, slice), ...] if len(shape) == 3
+        """
+        slices = []
+        if dataset.ndim == 4:
+            in_channels, i_z, i_y, i_x = dataset.shape
+        else:
+            i_z, i_y, i_x = dataset.shape
+
+        k_z, k_y, k_x = patch_shape
+        s_z, s_y, s_x = stride_shape
+        z_steps = SliceBuilder._gen_indices(i_z, k_z, s_z)
+        for z in z_steps:
+            y_steps = SliceBuilder._gen_indices(i_y, k_y, s_y)
+            for y in y_steps:
+                x_steps = SliceBuilder._gen_indices(i_x, k_x, s_x)
+                for x in x_steps:
+                    slice_idx = (
+                        slice(z, z + k_z),
+                        slice(y, y + k_y),
+                        slice(x, x + k_x)
+                    )
+                    if dataset.ndim == 4:
+                        slice_idx = (slice(0, in_channels),) + slice_idx
+                    slices.append(slice_idx)
+        return slices
+
+    @staticmethod
+    def _gen_indices(i, k, s):
+        assert i >= k, 'Sample size has to be bigger than the patch size'
+        for j in range(0, i - k + 1, s):
+            yield j
+        if j + k < i:
+            yield i - k
+
+    @staticmethod
+    def _check_patch_shape(patch_shape):
+        assert len(patch_shape) == 3, 'patch_shape must be a 3D tuple'
+        assert patch_shape[1] >= 64 and patch_shape[2] >= 64, 'Height and Width must be greater or equal 64'
 
 
 class Image3D(Dataset):

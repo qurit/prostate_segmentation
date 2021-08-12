@@ -68,13 +68,16 @@ class JointTransform3D:
         image = torch.Tensor(image)
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
 
-        # apply scaling
-        if self.multi_scale and not self.test:
-            return NotImplementedError
-
         # random crop
         if self.crop:
             if not self.test:
+
+                if self.multi_scale is not None:
+                    scale_factor = np.random.choice(self.multi_scale, 1)
+                    orig_shape = image.shape[-2:]
+                    new_shape = (scale_factor * orig_shape).astype(int).tolist()
+                    image, mask = T.Resize(new_shape)(image), T.Resize(new_shape)(mask)
+
                 i, j, h, w = T.RandomCrop.get_params(image, self.crop)
                 image, mask = F.crop(image, i, j, h, w), F.crop(mask, i, j, h, w)
             else:

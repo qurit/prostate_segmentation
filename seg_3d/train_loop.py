@@ -279,10 +279,11 @@ if __name__ == '__main__':
     # each inner list corresponds to the list of keys, values to change for a particular run
     # e.g. param_search = [["A", 1, "B", 2], ["C", 3"]] -> in 1st run set param A to 1 and param B to 2, in 2nd run set param C to 3
     # NOTE: training runs will be overwritten if OUTPUT_DIR is not unique
-    param_search = [[]]  # empty list will run a single training
+    param_search = ['seg_3d/config/tumor-run-4.yaml', 'seg_3d/config/tumor-run.yaml', 'seg_3d/config/multi-channel-tumor-focus.yaml']  # empty list will run a single training
 
     for params in param_search:
-        cfg = setup_config(*params)
+        print(params)
+        cfg = setup_config(params)
         cfg.freeze()
 
         # setup for automatic mixed precision (AMP) training

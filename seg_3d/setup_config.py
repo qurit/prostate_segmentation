@@ -10,10 +10,10 @@ def setup_config(*args) -> CN:
     cfg = get_cfg()
 
     # loads params from args
-    cfg.merge_from_list(list(args))
+    # cfg.merge_from_list(list(args))
 
     # load params from existing yaml
-    cfg.CONFIG_FILE = "seg_3d/config/prostate-baseline.yaml"
+    cfg.CONFIG_FILE = args[0]
     cfg.merge_from_file(cfg.CONFIG_FILE)
 
     # option to resume training

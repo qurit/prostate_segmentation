@@ -54,6 +54,7 @@ _C.TRANSFORMS.deform_sigma = None
 _C.TRANSFORMS.crop = None
 _C.TRANSFORMS.p_flip = None
 _C.TRANSFORMS.div_by_max = False
+_C.TRANSFORMS.multi_scale = None
 
 # -----------------------------------------------------------------------------
 # LOSS
@@ -118,7 +119,7 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 # MISC
 # -----------------------------------------------------------------------------
 _C.SEED = 99
-_C.NUM_WORKERS = 0  # number of workers for the data loaders
+_C.NUM_WORKERS = 6  # number of workers for the data loaders
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

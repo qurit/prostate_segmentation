@@ -37,6 +37,12 @@ _C.DATASET.PARAMS.modality_roi_map = [{"CT": ["Bladder"]}]
 _C.DATASET.PARAMS.num_slices = None  # number of slices in axial plane, if None then selects shortest scan length from dataset
 _C.DATASET.PARAMS.crop_size = None  # size of centre crop, if None then no centre cropping done
 
+_C.DATASET.PARAMS.patch_size = None # 3 dim tuple for patch size
+_C.DATASET.PARAMS.patch_stride = None # 3 dim tuple for patch stride (how far to move between patches)
+_C.DATASET.PARAMS.patch_halo = None # 3 dim tuple for size of halo to be removed from patches
+_C.DATASET.PARAMS.patching_input_size = None # Tuple describing original image input size before patching
+_C.DATASET.PARAMS.patching_label_size = None # Tuple describing original labels/mask size before patching
+
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 
 # -----------------------------------------------------------------------------
@@ -48,6 +54,7 @@ _C.TRANSFORMS.deform_sigma = None
 _C.TRANSFORMS.crop = None
 _C.TRANSFORMS.p_flip = None
 _C.TRANSFORMS.div_by_max = False
+_C.TRANSFORMS.multi_scale = None
 
 # -----------------------------------------------------------------------------
 # LOSS
@@ -60,7 +67,7 @@ _C.LOSS.FN = "DiceLoss"  # available loss functions are inside losses.py
 # -----------------------------------------------------------------------------
 # SOLVER
 # -----------------------------------------------------------------------------
-_C.SOLVER = CN()
+_C.SOLVER = CN(new_allowed=True)
 _C.SOLVER.PARAMS = CN(new_allowed=True)
 
 _C.SOLVER.OPTIM = "Adam"  # can select any optim from torch.optim
@@ -92,8 +99,12 @@ _C.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model
 # metrics which get computed during eval, available metrics found inside evaluation/metrics.py
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []
+_C.TEST.FINAL_EVAL_METRICS = []  # metrics to compute for the final eval step at the end of training
 _C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation
 _C.TEST.THRESHOLDS = None
+# option to visualize predictions using the mask visualizer
+# if in training mode, will only visualize masks at the end of the main train loop
+_C.TEST.VIS_PREDS = False
 
 # -----------------------------------------------------------------------------
 # PIPELINE MODES
@@ -102,11 +113,13 @@ _C.TEST.THRESHOLDS = None
 # weights from .pth file specified in checkpoint file inside _C.OUTPUT_DIR
 _C.RESUME = False
 _C.EVAL_ONLY = False  # Option to only run evaluation on data specified by _C.DATASET.TEST_DATASET_PATH
+_C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DATASET.TEST_DATASET_PATH
 
 # -----------------------------------------------------------------------------
 # MISC
 # -----------------------------------------------------------------------------
 _C.SEED = 99
+_C.NUM_WORKERS = 6  # number of workers for the data loaders
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

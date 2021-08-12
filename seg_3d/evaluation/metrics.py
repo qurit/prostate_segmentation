@@ -1,4 +1,6 @@
 # original code from https://github.com/cosmic-cortex/pytorch-UNet/blob/master/unet/metrics.py
+from typing import Callable, List, Dict
+
 import numpy as np
 import torch
 from fvcore.common.registry import Registry
@@ -12,10 +14,18 @@ EPSILON = 1e-32
 
 
 class MetricList:
-    def __init__(self, metrics, class_labels):
+    """
+    Groups together metrics computed during evaluation for easy processing
+    """
+    def __init__(self, metrics: Dict[str, Callable], class_labels: List[str]):
+        """
+        Args:
+            metrics: key is the name of the metric and value is the metric method that takes in two arguments
+            class_labels: labels for the classes, used to distinguish metric scores for different classes
+        """
         assert isinstance(metrics, dict), '\'metrics\' must be a dictionary of callables'
         self.metrics = metrics
-        self.results = {key: [] for key in self.metrics.keys()}
+        self.results = {key: [] for key in self.metrics}
         self.class_labels = class_labels
 
     def __call__(self, y_out, y_batch):
@@ -23,7 +33,7 @@ class MetricList:
             self.results[key].append(value(y_out, y_batch))
 
     def reset(self):
-        self.results = {key: [] for key in self.metrics.keys()}
+        self.results = {key: [] for key in self.metrics}
 
     def get_results_idx(self, idx):
         return {key: value[idx] for key, value in self.results.items()}
@@ -66,63 +76,58 @@ def hausdorff(pred, gt):
 
 
 @METRIC_REGISTRY.register()
-def dice_score(pred, gt, round=True):
-    if round:
-        pred = pred.round()  # threshold pred
-
+def dice_score(pred, gt):
     return (pred[gt == 1]).sum() * 2.0 / (pred.sum() + gt.sum())
 
 
 @METRIC_REGISTRY.register()
 def classwise_dice_score(pred, gt):
-    return compute_per_channel_dice(pred, gt, epsilon=1e-6).detach().cpu().numpy()
-
-
-@METRIC_REGISTRY.register()
-def bladder_dice_score(pred, gt):
-    return compute_per_channel_dice(pred, gt, epsilon=1e-6)[1]
+    # FIXME: issue when AMP=True and pred and gt are on cpu, so put them on gpu
+    return compute_per_channel_dice(pred.cuda(), gt.cuda(), epsilon=1e-6).cpu().numpy()
 
 
 @METRIC_REGISTRY.register()
 def argmax_dice_score(pred, gt):
-    pred = pred.detach().cpu().numpy().argmax(axis=1)
-    gt = gt.detach().cpu().numpy()
+    pred = pred.cpu().numpy().argmax(axis=1)
+    gt = gt.cpu().numpy()
 
-    pred_bg, pred_blad, pred_tum = pred.copy(), pred.copy(), pred.copy()
+    results = []
+    # take care of background channel first
+    pred_bg = pred.copy()
     pred_bg[pred_bg != 0] = -1
     pred_bg[pred_bg == 0] = 1
     pred_bg[pred_bg == -1] = 0
 
-    pred_blad[pred_blad != 1] = 0
+    results.append(
+        dice_score(pred_bg, gt[:, 0, ...])
+    )
 
-    pred_tum[pred_tum != 2] = 0
-    pred_tum[pred_tum == 2] = 1
+    # iterate through the rest of the channels
+    for i in range(1, gt.shape[1]):
+        pred_i = pred.copy()
+        pred_i[pred_i != i] = 0
+        pred_i[pred_i == i] = 1
+        results.append(
+            dice_score(pred_i, gt[:, i, ...])
+        )
 
-    gt_bg = gt[:, 0, :, :, :]
-    gt_blad = gt[:, 1, :, :, :]
-    gt_tum = gt[:, 2, :, :, :]
-
-    dice_bg = dice_score(pred_bg, gt_bg, round=False)
-    dice_blad = dice_score(pred_blad, gt_blad, round=False)
-    dice_tum = dice_score(pred_tum, gt_tum, round=False)
-
-    overlap = pred_blad * gt_tum
-
-    return [dice_bg, dice_blad, dice_tum]
+    return results
 
 
 @METRIC_REGISTRY.register()
 def overlap(pred, gt):
-    pred = pred.detach().cpu().numpy().argmax(axis=1)
-    gt = gt.detach().cpu().numpy()
+    # check if there are at least 3 channels
+    if pred.shape[1] < 3:
+        return np.NaN
+
+    pred = pred.cpu().numpy().argmax(axis=1)
+    gt = gt.cpu().numpy()
 
     pred[pred != 1] = 0
 
     gt = gt[:, 2, :, :, :]
 
-    overlap = (pred * gt).sum() / gt.shape[0]
-
-    return overlap
+    return (pred * gt).sum() / gt.shape[0]
 
 
 @METRIC_REGISTRY.register()
@@ -194,5 +199,7 @@ def classwise_f1_v2(pred, gt):
     return f1[1]
 
 
-def get_metrics(config):
-    return {metric: METRIC_REGISTRY.get(metric) for metric in config.TEST.EVAL_METRICS}
+def get_metrics(metrics: List[str]):
+    return {
+        metric: METRIC_REGISTRY.get(metric) for metric in metrics
+    }

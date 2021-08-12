@@ -1,0 +1,97 @@
+AMP_ENABLED: false
+CONFIG_FILE: seg_3d/config/prostate-detection.yaml
+OUTPUT_DIR: seg_3d/output/prostate-runs/testing-patching
+DATASET:
+  CLASS_LABELS:
+  - Background
+  - Inter
+  PARAMS:
+    crop_size:
+    - 250
+    - 250
+    modality: CT
+    modality_roi_map:
+    - CT:
+      - Inter
+    num_slices: 100
+    patch_size: (100,128,128)
+    patch_stride: (100,72,72)
+    patch_halo: (0,28,28)
+    patching_input_size: (1, 100, 200, 200)
+    patching_label_size: (2, 100, 200, 200)
+  TEST_DATASET_PATH:
+  - data/image_dataset
+  TEST_NUM_PATIENTS: null
+  TEST_PATIENT_KEYS: null
+  TRAIN_DATASET_PATH:
+  - data/image_dataset
+  TRAIN_NUM_PATIENTS: 40
+  TRAIN_PATIENT_KEYS: null
+  VAL_NUM_PATIENTS: 19
+  VAL_PATIENT_KEYS: null
+EARLY_STOPPING:
+  MODE: max
+  MONITOR: classwise_dice_score/Inter
+  PATIENCE: 20
+EVAL_ONLY: false
+LOSS:
+  FN: BCEDiceSSIMLoss
+  PARAMS:
+    bce_weight: 1.0
+    ssim_weight: 3.0
+    dice_weight: 0.3
+    class_labels:
+    class_weight:
+    - 0
+    - 1
+    class_weight_loss: both
+    normalization: sigmoid
+MODEL:
+  BACKBONE:
+    NAME: UNet3D
+  DEVICE: cuda
+  META_ARCHITECTURE: SemanticSegNet
+  UNET:
+    f_maps: 16
+    final_sigmoid: true
+    in_channels: 1
+    out_channels: 2
+  WEIGHTS: ''
+NUM_WORKERS: 6
+PRED_ONLY: false
+RESUME: false
+SEED: 99
+SOLVER:
+  CHECKPOINT_PERIOD: 200
+  GAMMA: 0.1
+  IMS_PER_BATCH: 1
+  MAX_ITER: 1000000
+  OPTIM: Adam
+  PARAMS:
+    lr: 0.00005
+  STEPS:
+  - 200
+  - 480
+  - 700
+  WARMUP_FACTOR: 0.001
+  WARMUP_ITERS: 0
+  WARMUP_METHOD: linear
+TEST:
+  EVAL_METRICS:
+  - classwise_dice_score
+  - argmax_dice_score
+  EVAL_PERIOD: 2
+  INFERENCE_FILE_NAME: inference.pk
+  THRESHOLDS: null
+
+TRANSFORMS:
+  crop:
+  - 200
+  - 200
+  deform_points:
+  - 2
+  - 2
+  - 2
+  deform_sigma: null
+  div_by_max: false
+  p_flip: 0.5

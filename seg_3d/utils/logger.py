@@ -34,10 +34,10 @@ class _ColorfulFormatter(logging.Formatter):
 
 @functools.lru_cache()  # so that calling setup_logger multiple times won't add many handlers
 def setup_logger(
-    output=None, distributed_rank=0, *, color=True, name="detectron2", abbrev_name=None
+    output=None, distributed_rank=0, *, color=True, name="", abbrev_name=None
 ):
     """
-    Initialize the detectron2 logger and set its verbosity level to "DEBUG".
+    Initialize the logger and set its verbosity level to "DEBUG".
 
     Args:
         output (str): a file name or a directory to save log. If None, will not save log file.
@@ -57,7 +57,7 @@ def setup_logger(
     logger.propagate = False
 
     if abbrev_name is None:
-        abbrev_name = "d2" if name == "detectron2" else name
+        abbrev_name = name
 
     plain_formatter = logging.Formatter(
         "[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S"

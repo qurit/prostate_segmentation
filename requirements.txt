@@ -8,7 +8,8 @@ opencv-python
 pandas
 pydicom
 pytorch
-scikit-image
+pyyaml
+scikit-image==0.18.0rc1
 scikit-learn
 scipy
 SimpleITK

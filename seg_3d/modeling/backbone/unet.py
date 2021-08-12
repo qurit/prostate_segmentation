@@ -151,28 +151,3 @@ class ResidualUNet3D(Abstract3DUNet):
                                              is_segmentation=is_segmentation,
                                              conv_padding=conv_padding,
                                              **kwargs)
-
-
-@BACKBONE_REGISTRY.register()
-class UNet2D(Abstract3DUNet):
-    """
-    Just a standard 2D Unet. Arises naturally by specifying conv_kernel_size=(1, 3, 3), pool_kernel_size=(1, 2, 2).
-    """
-
-    def __init__(self, in_channels, out_channels, final_sigmoid=True, f_maps=64, layer_order='gcr',
-                 num_groups=8, num_levels=4, is_segmentation=True, conv_padding=1, **kwargs):
-        if conv_padding == 1:
-            conv_padding = (0, 1, 1)
-        super(UNet2D, self).__init__(in_channels=in_channels,
-                                     out_channels=out_channels,
-                                     final_sigmoid=final_sigmoid,
-                                     basic_module=DoubleConv,
-                                     f_maps=f_maps,
-                                     layer_order=layer_order,
-                                     num_groups=num_groups,
-                                     num_levels=num_levels,
-                                     is_segmentation=is_segmentation,
-                                     conv_kernel_size=(1, 3, 3),
-                                     pool_kernel_size=(1, 2, 2),
-                                     conv_padding=conv_padding,
-                                     **kwargs)

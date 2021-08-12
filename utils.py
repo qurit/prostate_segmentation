@@ -1,11 +1,12 @@
-import scipy
-from scipy import ndimage
 import operator
+
 import numpy as np
-import matplotlib.pyplot as plt
+from scipy import ndimage
 
 
 def centre_crop(img, bounding):
+    if bounding is None:
+        return img
     start = tuple(map(lambda a, da: a//2-da//2, img.shape, bounding))
     end = tuple(map(operator.add, start, bounding))
     slices = tuple(map(slice, start, end))
@@ -32,20 +33,3 @@ def contour2mask(contours, size, xy_ordering=True):
             mask[poly[:, 0], poly[:, 1]] = 1
     mask = ndimage.morphology.binary_fill_holes(mask)
     return mask
-
-
-def visualize(img, patient, thresh_pred, sobel_pred, sobel_dice, ground_truth):
-    fig, (ax1, ax2) = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle(patient)
-    ax1[0].imshow(img)
-    ax1[0].set_title('Original ')
-    ax1[1].imshow(ground_truth, cmap='Dark2', interpolation='none', alpha=0.7)
-    ax1[1].set_title('Ground Truth Mask')
-    ax2[0].imshow(thresh_pred)
-    ax2[0].imshow(ground_truth, cmap='Dark2', interpolation='none', alpha=0.7)
-    ax2[0].set_title('Thresholded '+str(thresh_pred.sum() / 255))
-    ax2[1].imshow(sobel_pred, cmap='gray', interpolation='none')
-    ax2[1].imshow(ground_truth, cmap='Dark2', interpolation='none', alpha=0.7)
-    ax2[1].set_title('Sobel On Original '+str(sobel_dice)+' '+str(sobel_pred.sum()))
-    plt.show()
-    plt.close('all')

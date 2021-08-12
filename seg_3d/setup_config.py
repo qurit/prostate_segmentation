@@ -10,17 +10,17 @@ def setup_config(*args) -> CN:
     cfg = get_cfg()
 
     # loads params from args
-    cfg.merge_from_list(list(args))
+    # cfg.merge_from_list(list(args))
 
     # load params from existing yaml
-    cfg.CONFIG_FILE = "seg_3d/config/bladder-detection.yaml"
+    cfg.CONFIG_FILE = args[0]
     cfg.merge_from_file(cfg.CONFIG_FILE)
 
     # option to resume training
     # resume_training(cfg)
 
     # add custom config which override parameter values if they already exist
-    add_custom_config(cfg)
+    # add_custom_config(cfg)
     # add_inference_config(cfg)
 
     return cfg

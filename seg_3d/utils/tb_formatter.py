@@ -1,5 +1,4 @@
 # Original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/utils.py#L186-L260
-# Copyright (c) 2018 Adrian Wolny
 import numpy as np
 
 

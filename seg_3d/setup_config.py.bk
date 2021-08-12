@@ -1,0 +1,85 @@
+import os
+
+import numpy as np
+from fvcore.common.config import CfgNode as CN
+
+from seg_3d.config import get_cfg
+import seg_3d.modeling.backbone.unet
+import seg_3d.modeling.meta_arch.segnet
+
+
+def setup_config(*args) -> CN:
+    # get the default config from default.py
+    cfg = get_cfg()
+
+    # loads params from args
+    #cfg.merge_from_list(list(args))
+
+    # load params from existing yaml
+    cfg.CONFIG_FILE = args[0]
+    cfg.merge_from_file(cfg.CONFIG_FILE)
+
+    # option to resume training
+    # resume_training(cfg)
+
+    # add custom config which override parameter values if they already exist
+    #add_custom_config(cfg)
+    #cfg.DATASET.TEST_PATIENT_KEYS = ['PSMA-01-844', 'PSMA-01-110', 'PSMA-01-135', 'PSMA-01-732', 'PSMA-01-020', 'PSMA-01-211', 'PSMA-01-494', 'PSMA-01-646', 'PSMA-01-360', 'PSMA-01-733', 'PSMA-01-852', 'PSMA-01-535', 'PSMA-01-596', 'PSMA-01-045', 'PSMA-01-018', 'PSMA-01-664', 'PSMA-01-160', 'PSMA-01-835', 'PSMA-01-105']
+    #cfg.MODEL.DEVICE = "cpu"
+    #cfg.TEST.VIS_PREDS = True
+    #cfg.OUTPUT_DIR = "seg_3d/output/test-1"
+    # add_inference_config(cfg)
+
+    return cfg
+
+
+def add_custom_config(cfg: CN) -> None:
+    cfg.MODEL.DEVICE = "cpu"
+    # cfg.MODEL.UNET.in_channels = 2
+    # cfg.MODEL.UNET.out_channels = 4
+    # cfg.DATASET.PARAMS.modality = ["PT", "CT"]
+    # cfg.DATASET.PARAMS.slice_shape = (200, 200)
+    # cfg.DATASET.PARAMS.crop_size = (110, 120)
+    # cfg.DATASET.PARAMS.rois = ["Tumor", "Bladder", "Inter"]
+    cfg.DATASET.PARAMS.patch_wise = (1,1,1)
+    cfg.OUTPUT_DIR = "seg_3d/output/multiloss-test-1"
+    #
+    # # dataset and transform
+    cfg.TRANSFORMS.deform_sigma = None
+    cfg.TRANSFORMS.deform_points = (2, 2, 2)
+    cfg.TRANSFORMS.crop = None
+    cfg.TRANSFORMS.p_flip = None
+
+    # evaluation
+    cfg.TEST.EVAL_PERIOD = 2
+    cfg.TEST.THRESHOLDS = None
+    cfg.TEST.EVAL_METRICS = ["argmax_dice_score", "classwise_dice_score"]
+    cfg.EARLY_STOPPING.PATIENCE = 40  # set to 0 to disable
+    cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score/Bladder"
+    cfg.EARLY_STOPPING.MODE = "max"
+
+    # loss
+    cfg.LOSS.FN = "MultiLoss"
+    cfg.LOSS.PARAMS.clear()
+    cfg.LOSS.PARAMS.weights = [4,2]
+    cfg.LOSS.PARAMS.losses = [("BCEWithLogitsLoss", {}),
+                              ("WeightedSmoothL1Loss", {'threshold': 0.5, 'initial_weight': 1.0})]
+
+    # optimizer and lr scheduler
+    cfg.SOLVER.PARAMS.lr = 0.0001
+    cfg.SOLVER.IMS_PER_BATCH = 1
+    cfg.SOLVER.MAX_ITER = 10
+    cfg.SOLVER.CHECKPOINT_PERIOD = 200
+    cfg.SOLVER.STEPS = (240, 480, 700,)
+
+
+def add_inference_config(cfg: CN) -> None:
+    cfg.EVAL_ONLY = True
+    cfg.MODEL.WEIGHTS = "seg_3d/output/slice-392-even-later-lr-drop-fmaps-32-amp/model_best.pth"
+    cfg.TEST.INFERENCE_FILE_NAME = "test_inference.pk"
+    cfg.MODEL.UNET.final_sigmoid = True
+    cfg.TEST.THRESHOLDS = None
+
+
+def resume_training(cfg: CN) -> None:
+    cfg.RESUME = True

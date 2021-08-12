@@ -22,7 +22,7 @@ from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.seg_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
+from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
 
@@ -199,7 +199,7 @@ def train(model):
                 # configure mask visualizer if specified
                 if cfg.TEST.VIS_PREDS:
                     evaluator.set_mask_visualizer(
-                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")  # skip label for bgd
                     )
 
                 # run evaluation and save metrics to a .txt file

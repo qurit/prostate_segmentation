@@ -279,10 +279,9 @@ if __name__ == '__main__':
     # each inner list corresponds to the list of keys, values to change for a particular run
     # e.g. param_search = [["A", 1, "B", 2], ["C", 3"]] -> in 1st run set param A to 1 and param B to 2, in 2nd run set param C to 3
     # NOTE: training runs will be overwritten if OUTPUT_DIR is not unique
-    param_search = ['seg_3d/config/tumor-run-4.yaml', 'seg_3d/config/tumor-run.yaml', 'seg_3d/config/multi-channel-tumor-focus.yaml']  # empty list will run a single training
+    param_search = [[]]  # can specify file paths of different config.yamls, empty list will run a single training
 
     for params in param_search:
-        print(params)
         cfg = setup_config(params)
         cfg.freeze()
 
@@ -290,12 +289,21 @@ if __name__ == '__main__':
         scaler = GradScaler(enabled=cfg.AMP_ENABLED)
 
         # setup loggers for the various modules
-        setup_logger(output=cfg.OUTPUT_DIR, name="fvcore")
-        setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
+        logger_list = [
+            setup_logger(output=cfg.OUTPUT_DIR, name="fvcore"),
+            setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
+        ]
+
         logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
+        logger.info("Starting new run...")
 
         # create directory to store output files
         os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
         # run train loop
         run()
+
+        # cleanup run
+        for log in logger_list:
+            log.handlers.clear()
+

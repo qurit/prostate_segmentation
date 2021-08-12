@@ -1,4 +1,5 @@
 import os
+from collections import OrderedDict
 
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
@@ -11,14 +12,15 @@ from utils import centre_crop, dice_score
 
 # define mapping of roi to cmap
 # all sequential cmaps here https://matplotlib.org/stable/tutorials/colors/colormaps.html#sequential
-cmap_roi_map = {
+# this dict also specifies the order in which rois are plotted e.g. Inter is plotted first, then Bladder
+cmap_roi_map = OrderedDict({
     "Inter": "Greens",
     "Bladder": "Reds",
     "Tumor": "Purples",
     "TURP urethra": "Greys",
     "R seminal": "Oranges",
     "L seminal": "Blues"
-}
+})
 
 
 class MaskVisualizer:
@@ -41,6 +43,8 @@ class MaskVisualizer:
             algos = [""]
         self.algos = algos
         self.class_labels = class_labels
+        assert len(set(self.class_labels) - set(cmap_roi_map.keys())) == 0,\
+            "a mapping from class to color map needs to be defined for all class labels"
         self.crop_size = crop_size
         self.root_plot_dir = root_plot_dir
         self.fig_grid = fig_grid
@@ -49,8 +53,8 @@ class MaskVisualizer:
 
         # configure color maps
         self.sample_cmap = "inferno"
-        self.gt_cmap = "Paired"
-        self.pred_cmap_dict = {label: cmap_roi_map[label] for label in class_labels}
+        self.pred_cmap_dict = OrderedDict({label: cmap_roi_map[label] for label in class_labels})
+        self.plot_ordering = {label: idx for idx, label in enumerate(cmap_roi_map) if label in self.pred_cmap_dict}
 
     def plot_mask_predictions(
             self, patient: str, sample: np.ndarray, pred_dict: Dict[str, np.ndarray] or np.ndarray,
@@ -163,7 +167,7 @@ class MaskVisualizer:
                 gt_images.append(gt_im)
 
                 # show ground truth
-                axs[a, b].imshow(gt_im, interpolation="none", alpha=1.0)
+                axs[a, b].imshow(gt_im, interpolation="none", alpha=1.0, zorder=self.plot_ordering[label])
 
             # add title and legend
             axs[a, b].set_title("Ground Truth Mask")
@@ -217,7 +221,7 @@ class MaskVisualizer:
                         )
 
                     # show pred
-                    axs[a, b].imshow(pred_im, interpolation="none", alpha=pred_alpha)
+                    axs[a, b].imshow(pred_im, interpolation="none", alpha=pred_alpha, zorder=self.plot_ordering[label])
 
             fig.suptitle("%s Order: %.0f" % (patient, i))
             # add legend for the prediction masks

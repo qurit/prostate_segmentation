@@ -6,6 +6,7 @@ import random
 from time import time
 
 import numpy as np
+import torch
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 from iopath import PathManager
 from torch.cuda.amp import GradScaler, autocast
@@ -22,7 +23,7 @@ from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.seg_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
+from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
 
@@ -199,7 +200,7 @@ def train(model):
                 # configure mask visualizer if specified
                 if cfg.TEST.VIS_PREDS:
                     evaluator.set_mask_visualizer(
-                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")  # skip label for bgd
                     )
 
                 # run evaluation and save metrics to a .txt file
@@ -275,14 +276,10 @@ def run():
 
 
 if __name__ == '__main__':
-    # specify params to change for each run to launch consecutive trainings
-    # each inner list corresponds to the list of keys, values to change for a particular run
-    # e.g. param_search = [["A", 1, "B", 2], ["C", 3"]] -> in 1st run set param A to 1 and param B to 2, in 2nd run set param C to 3
-    # NOTE: training runs will be overwritten if OUTPUT_DIR is not unique
-    param_search = [[]]  # can specify file paths of different config.yamls, empty list will run a single training
+    cfg_gen = setup_config()  # this returns a generator
 
-    for params in param_search:
-        cfg = setup_config(params)
+    for cfg in cfg_gen:
+        cfg.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else cfg.MODEL.DEVICE
         cfg.freeze()
 
         # setup for automatic mixed precision (AMP) training

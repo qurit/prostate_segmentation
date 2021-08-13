@@ -1,70 +1,81 @@
+import os
+
 from fvcore.common.config import CfgNode as CN
 
 from seg_3d.config import get_cfg
 import seg_3d.modeling.backbone.unet
 import seg_3d.modeling.meta_arch.segnet
+from seg_3d.utils.cross_validation import k_folds
 
 
-def setup_config(*args) -> CN:
-    # get the default config from default.py
-    cfg = get_cfg()
+def setup_config() -> CN:
+    base_path = "seg_3d/output/"  # convenient variable if all paths have same base path
+    config_paths = []  # specify a list of file paths for existing configs
 
-    # loads params from args
-    # cfg.merge_from_list(list(args))
+    # specify params to change for each run to launch consecutive trainings
+    # each inner list corresponds to the list of keys, values to change for a particular run
+    # e.g. param_search = [["A", 1, "B", 2], ["C", 3"]] -> in 1st run set param A to 1 and param B to 2, in 2nd run set param C to 3
+    # NOTE: training runs will be overwritten if OUTPUT_DIR is not unique
+    param_search = []
 
-    # load params from existing yaml
-    cfg.CONFIG_FILE = args[0]
-    cfg.merge_from_file(cfg.CONFIG_FILE)
+    # option to run cross validation
+    k_fold = None  # k_folds(n_splits=59, subjects=59)
 
-    # option to resume training
-    # resume_training(cfg)
+    # iterate over either config paths, param search, or folds
+    for i, args in enumerate(config_paths or param_search or k_fold):
+        # get the default config from default.py
+        cfg = get_cfg()
 
-    # add custom config which override parameter values if they already exist
-    # add_custom_config(cfg)
-    # add_inference_config(cfg)
+        if type(args) is list:
+            # loads params from args
+            cfg.merge_from_list(args)
 
-    return cfg
+        elif type(args) is str:
+            # load params from existing yaml
+            cfg.CONFIG_FILE = os.path.join(base_path, args)
+            cfg.merge_from_file(cfg.CONFIG_FILE)
 
+        elif k_fold:
+            # load params from existing yaml
+            cfg.CONFIG_FILE = os.path.join(base_path, "config.yaml")  # edit here
+            cfg.merge_from_file(cfg.CONFIG_FILE)
 
-def add_custom_config(cfg: CN) -> None:
-    cfg.OUTPUT_DIR = "seg_3d/output/test-1"
+            # get indices for current fold
+            train_idx, test_idx = args
+            cfg.DATASET.TRAIN_PATIENT_KEYS = train_idx.astype(int).tolist()
+            cfg.DATASET.VAL_PATIENT_KEYS = test_idx.astype(int).tolist()
+            cfg.OUTPUT_DIR = os.path.join(base_path, "cross-val-run", str(i))  # edit here
 
-    # dataset and transform
-    cfg.TRANSFORMS.deform_sigma = 5
-    cfg.TRANSFORMS.deform_points = (2, 2, 2)
-    cfg.TRANSFORMS.crop = (128, 128)
-    cfg.TRANSFORMS.p_flip = 0.5
+        # option to resume training
+        # cfg.RESUME = True
 
-    # evaluation
-    cfg.TEST.EVAL_METRICS = ["classwise_dice_score", "argmax_dice_score", "overlap"]
-    cfg.EARLY_STOPPING.PATIENCE = 40  # set to 0 to disable
-    cfg.EARLY_STOPPING.MONITOR = "classwise_dice_score/Bladder"
-    cfg.EARLY_STOPPING.MODE = "max"
+        # add custom config which override parameter values if they already exist
+        # add_custom_config(cfg)
+        # add_inference_config(cfg, weights=os.path.join(base_path, "model_best.pth"))
 
-    # loss
-    cfg.LOSS.FN = "BCEDiceWithOverlapLoss"
-    cfg.LOSS.PARAMS.bce_weight = 0.
-    cfg.LOSS.PARAMS.dice_weight = 1.0
-    cfg.LOSS.PARAMS.overlap_weight = 10.
-    # tuple containing the channel indices of pred, gt for overlap computation: (pred bladder channel, gt tumor channel)
-    cfg.LOSS.PARAMS.overlap_idx = (1, 2)
-    cfg.LOSS.PARAMS.class_weight = [0, 2, 1]  # background, bladder, tumor weight
-
-    # optimizer and lr scheduler
-    cfg.SOLVER.PARAMS.lr = 0.0001
-    cfg.SOLVER.IMS_PER_BATCH = 5
-    cfg.SOLVER.MAX_ITER = 1000000
-    cfg.SOLVER.CHECKPOINT_PERIOD = 200
-    cfg.SOLVER.STEPS = (240, 480, 700,)
+        yield cfg
 
 
-def add_inference_config(cfg: CN) -> None:
+def add_inference_config(cfg: CN, weights="model_best.pth") -> None:
     cfg.EVAL_ONLY = True
-    cfg.MODEL.WEIGHTS = "seg_3d/output/test-1/model_best.pth"
+    cfg.MODEL.WEIGHTS = weights
     cfg.TEST.INFERENCE_FILE_NAME = "test_inference.pk"
     cfg.MODEL.UNET.final_sigmoid = False
     cfg.TEST.THRESHOLDS = None
 
 
-def resume_training(cfg: CN) -> None:
-    cfg.RESUME = True
+def add_custom_config(cfg: CN) -> None:
+    pass
+    # cfg.OUTPUT_DIR = "test-1"
+
+    # dataset and transform
+    # cfg.TRANSFORMS
+
+    # evaluation
+    # cfg.TEST
+
+    # loss
+    # cfg.LOSS
+
+    # optimizer and lr scheduler
+    # cfg.SOLVER

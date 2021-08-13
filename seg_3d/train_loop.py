@@ -6,6 +6,7 @@ import random
 from time import time
 
 import numpy as np
+import torch
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 from iopath import PathManager
 from torch.cuda.amp import GradScaler, autocast
@@ -278,6 +279,7 @@ if __name__ == '__main__':
     cfg_gen = setup_config()  # this returns a generator
 
     for cfg in cfg_gen:
+        cfg.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else cfg.MODEL.DEVICE
         cfg.freeze()
 
         # setup for automatic mixed precision (AMP) training

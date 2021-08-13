@@ -170,15 +170,15 @@ class BCEDiceWithOverlapLoss(nn.Module):
 
     def forward(self, input, target) -> Dict[str, torch.Tensor]:
         # dice
-        dice_loss = self.dice(input, target)
+        dice_loss = self.dice(input, target[:, :input.shape[1]])
         # get raw dice scores
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
         # apply per channel weighting to dice
-        dice_loss *= self.class_weight.to(input.device)
+        dice_loss *= self.class_weight[:input.shape[1]].to(input.device)
 
         # bce
         self.bce.to(input.device)
-        bce_loss = self.bce(input, target)
+        bce_loss = self.bce(input, target[:, :input.shape[1]])
 
         # overlap
         # don't compute overlap if overlap_idx is set to None
@@ -190,7 +190,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         else:
             dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
 
-        self.logger.info(("BCE: {:.8f} Overlap: {:.4f} Dice: " + "{}" * target.shape[1])
+        self.logger.info(("BCE: {:.8f} Overlap: {:.4f} Dice: " + "{}" * input.shape[1])
                          .format(bce_loss, overlap_loss, *dice_log))
 
         return {

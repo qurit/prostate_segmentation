@@ -2,15 +2,15 @@ import json
 import logging
 from typing import Callable, List, Tuple
 
-import tqdm
 import torch
+import tqdm
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 
 from seg_3d.data.dataset import ImageToImage3D
-from seg_3d.utils.slice_builder import SliceBuilder
-from seg_3d.evaluation.metrics import MetricList
 from seg_3d.evaluation.mask_visualizer import MaskVisualizer
+from seg_3d.evaluation.metrics import MetricList
+from seg_3d.utils.slice_builder import SliceBuilder
 
 
 class Evaluator:
@@ -108,6 +108,13 @@ class Evaluator:
                     if self.thresholds:
                         preds[:] = self.threshold_predictions(preds.squeeze(1))
 
+                    # make sure pred and labels have same number of channels
+                    if preds.shape[1] < labels.shape[1]:
+                        shape = list(labels.shape)
+                        shape[1] = labels.shape[1] - preds.shape[1]
+                        preds = torch.cat((preds, torch.zeros(shape)), dim=1)
+
+                    # get scores for all metrics
                     self.metric_list(preds, labels)
 
                     # print out results for patient

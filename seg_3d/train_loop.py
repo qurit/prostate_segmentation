@@ -275,14 +275,9 @@ def run():
 
 
 if __name__ == '__main__':
-    # specify params to change for each run to launch consecutive trainings
-    # each inner list corresponds to the list of keys, values to change for a particular run
-    # e.g. param_search = [["A", 1, "B", 2], ["C", 3"]] -> in 1st run set param A to 1 and param B to 2, in 2nd run set param C to 3
-    # NOTE: training runs will be overwritten if OUTPUT_DIR is not unique
-    param_search = [[]]  # can specify file paths of different config.yamls, empty list will run a single training
+    cfg_gen = setup_config()  # this returns a generator
 
-    for params in param_search:
-        cfg = setup_config(params)
+    for cfg in cfg_gen:
         cfg.freeze()
 
         # setup for automatic mixed precision (AMP) training

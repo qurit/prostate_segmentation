@@ -124,7 +124,7 @@ class ImageToImage3D(Dataset):
 
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
-                 joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None,
+                 joint_transform: Callable = None, patient_keys: List[str] or List[int] = None, num_patients: int = None,
                  patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None,
                  patch_halo: Tuple[int] = None, **kwargs) -> None:
         # convert to a simple dict
@@ -133,7 +133,7 @@ class ImageToImage3D(Dataset):
         # useful inverse mapping which maps roi to modality
         self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
         self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask array
-        self.patient_keys = patient_keys
+        self.patient_keys = patient_keys  # this can either be a list of strings for keys or list of ints for indices
         self.num_slices = num_slices
         self.slice_shape = slice_shape
         self.crop_size = crop_size
@@ -155,9 +155,13 @@ class ImageToImage3D(Dataset):
             with open(os.path.join(dp, "global_dict.json")) as file_obj:
                 self.dataset_dict = {**self.dataset_dict, **json.load(file_obj)}
 
-        # if no patients specified then select all from dataset
         if patient_keys is None:
+            # if no patients specified then select all from dataset
             self.patient_keys = list(self.dataset_dict.keys())
+        elif type(patient_keys[0]) is int:
+            # if patient keys param is a list of indices get the keys from dataset
+            all_patients = list(self.dataset_dict.keys())
+            self.patient_keys = [all_patients[idx] for idx in patient_keys]
 
         # sample select patients if num_patients specified
         if num_patients is not None:

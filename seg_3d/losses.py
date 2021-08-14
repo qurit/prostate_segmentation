@@ -174,7 +174,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         # get raw dice scores
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
         # apply per channel weighting to dice
-        dice_loss *= self.class_weight[:input.shape[1]].to(input.device)
+        dice_loss *= self.class_weight.to(input.device)
 
         # bce
         self.bce.to(input.device)

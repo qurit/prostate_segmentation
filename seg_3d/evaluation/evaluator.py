@@ -112,7 +112,7 @@ class Evaluator:
                     if preds.shape[1] < labels.shape[1]:
                         shape = list(labels.shape)
                         shape[1] = labels.shape[1] - preds.shape[1]
-                        preds = torch.cat((preds, torch.zeros(shape)), dim=1)
+                        preds = torch.cat((preds, torch.zeros(shape).to(self.device)), dim=1)
 
                     # get scores for all metrics
                     self.metric_list(preds, labels)

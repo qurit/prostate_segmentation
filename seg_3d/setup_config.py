@@ -8,7 +8,14 @@ import seg_3d.modeling.meta_arch.segnet
 from seg_3d.utils.cross_validation import k_folds
 
 
-def setup_config() -> CN:
+def setup_config(*args) -> CN:
+    # simple setup
+    if args:
+        cfg = get_cfg()
+        cfg.merge_from_file(args[0][0])
+        yield cfg
+        return
+
     base_path = "seg_3d/output/"  # convenient variable if all paths have same base path
     config_paths = []  # specify a list of file paths for existing configs
 

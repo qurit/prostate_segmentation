@@ -3,6 +3,7 @@ import logging
 import os
 import pickle
 import random
+import sys
 from time import time
 
 import numpy as np
@@ -276,7 +277,9 @@ def run():
 
 
 if __name__ == '__main__':
-    cfg_gen = setup_config()  # this returns a generator
+    cfg_gen = setup_config(
+        sys.argv[1:]  # get config file path from cmd line if any
+    )  # this returns a generator
 
     for cfg in cfg_gen:
         cfg.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else cfg.MODEL.DEVICE

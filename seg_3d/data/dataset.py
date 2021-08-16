@@ -143,6 +143,10 @@ class ImageToImage3D(Dataset):
         self.patch_halo = patch_halo
         self.logger = logging.getLogger(__name__)
 
+        if self.slice_shape is None and len(self.modality) > 1:
+            self.logger.warning("Doing multi channel but 'slice_shape' is set to None! "
+                                "Use 'slice_shape' to specify a common resolution across modalities")
+
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
         else:

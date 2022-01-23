@@ -1,3 +1,4 @@
+import glob
 import json
 import logging
 import os
@@ -10,6 +11,8 @@ import numpy as np
 import torch
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 from iopath import PathManager
+from sacred import Experiment
+from sacred.observers import MongoObserver
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
@@ -26,6 +29,8 @@ from seg_3d.utils.logger import setup_logger
 from seg_3d.utils.scheduler import build_lr_scheduler
 from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
+
+ex = Experiment()
 
 
 def train(model):
@@ -143,23 +148,30 @@ def train(model):
                 # updates the scale for next iteration
                 scaler.update()
 
-                storage.put_scalars(training_loss=training_loss,
-                                    lr=optimizer.param_groups[0]["lr"],
-                                    **loss_dict, smoothing_hint=False)
+                scalars = {"training_loss": training_loss,
+                           "lr": optimizer.param_groups[0]["lr"],
+                           **loss_dict}
+                for k, v in scalars.items():
+                    storage.put_scalar(k, v, smoothing_hint=False)
+                    ex.log_scalar(k, float(v), step=iteration)
+
                 scheduler.step()
 
                 # check if need to run eval step on validation data
                 if cfg.TEST.EVAL_PERIOD > 0 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0:
                     results = evaluator.evaluate(model)
-                    storage.put_scalars(**results["metrics"], smoothing_hint=False)
+                    for k, v in results["metrics"].items():
+                        storage.put_scalar(k, v, smoothing_hint=False)
+                        ex.log_scalar(k, float(v), step=iteration)
 
                     # check early stopping
                     if early_stopping.check_early_stopping(results["metrics"]):
                         # update best model
                         periodic_checkpointer.save(name="model_best", iteration=iteration, **results["metrics"])
                         # save inference results
-                        with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
-                            pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
+                        if cfg.TEST.INFERENCE_FILE_NAME:
+                            with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
+                                pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
                         # save best metrics to a .txt file
                         with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
                             json.dump(results["metrics"], f, indent=4)
@@ -204,22 +216,22 @@ def train(model):
                         cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")  # skip label for bgd
                     )
 
-                # run evaluation and save metrics to a .txt file
+                # run evaluation
+                results = evaluator.evaluate(model)
+                for k, v in results["metrics"].items():
+                    ex.log_scalar(k, float(v), step=iteration)
+
+                # save inference results
+                if cfg.TEST.INFERENCE_FILE_NAME:
+                    with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
+                        pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
+                # save best metrics to a .txt file
                 with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
-                    json.dump(
-                        evaluator.evaluate(model)["metrics"], f, indent=4
-                    )
+                    json.dump(results["metrics"], f, indent=4)
 
 
+@ex.main
 def run():
-    path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
-    with PathManager().open(path, "w") as f:
-        f.write(cfg.dump())
-    logger.info("Full config saved to {}".format(path))
-
-    # save zipped up code to output dir
-    zip_files_in_dir(seg_3d.__name__, zip_file_name=os.path.join(cfg.OUTPUT_DIR, "code.zip"))
-
     # make training deterministic
     seed_all(cfg.SEED)
 
@@ -277,13 +289,27 @@ def run():
 
 
 if __name__ == '__main__':
+    ex.observers.append(
+        MongoObserver(url=f'mongodb://'
+                          f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
+                          f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
+                          f'@localhost:27017/?authMechanism=SCRAM-SHA-1', db_name='db')
+    )  # assumes mongo db is running
+
     cfg_gen = setup_config(
         sys.argv[1:]  # get config file path from cmd line if any
     )  # this returns a generator
 
     for cfg in cfg_gen:
         cfg.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else cfg.MODEL.DEVICE
-        cfg.freeze()
+        cfg.freeze()  # freeze all parameters
+
+        # create directory to store output files
+        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+        cfg_path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
+        with PathManager().open(cfg_path, "w") as f:
+            f.write(cfg.dump())
+        ex.add_config(cfg_path)  # add config to sacred experiment
 
         # setup for automatic mixed precision (AMP) training
         scaler = GradScaler(enabled=cfg.AMP_ENABLED)
@@ -296,14 +322,14 @@ if __name__ == '__main__':
 
         logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
         logger.info("Starting new run...")
-
-        # create directory to store output files
-        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+        logger.info("Full config saved to {}".format(cfg_path))
+        ex.logger = logger
 
         # run train loop
-        run()
+        ex.run(config_updates={"seed": cfg.SEED},
+               options={"--name": os.path.basename(cfg.OUTPUT_DIR),
+                        "--base_dir": cfg.OUTPUT_DIR})
 
         # cleanup run
         for log in logger_list:
             log.handlers.clear()
-

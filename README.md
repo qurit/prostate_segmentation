@@ -18,3 +18,6 @@ python -m seg_3d.train_loop --name=eval_test with 'EVAL_ONLY=True'
 ```shell
 python -m seg_3d.train_loop --name=eval_test with 'PRED_ONLY=True'
 ```
+
+Make sure to source environment with `set -o allexport; source .env; set +o allexport`.
+To bring up omniboard and mongo run `docker-compose up` from the repo root directory.

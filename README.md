@@ -18,3 +18,5 @@ python -m seg_3d.train_loop --name=eval_test with 'EVAL_ONLY=True'
 ```shell
 python -m seg_3d.train_loop --name=eval_test with 'PRED_ONLY=True'
 ```
+
+To bring up docker compose `docker-compose up`.

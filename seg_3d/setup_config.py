@@ -8,16 +8,16 @@ import seg_3d.modeling.meta_arch.segnet
 from seg_3d.utils.cross_validation import k_folds
 
 
+# FIXME: this setup is confusing
 def setup_config(*args) -> CN:
     # simple setup
-    if args:
+    if any(args):
         cfg = get_cfg()
         cfg.merge_from_file(args[0][0])
-        yield cfg
-        return
+        return cfg
 
-    base_path = "seg_3d/output/"  # convenient variable if all paths have same base path
-    config_paths = []  # specify a list of file paths for existing configs
+    base_path = "seg_3d/config/"  # convenient variable if all paths have same base path
+    config_paths = ['bladder-detection.yaml']  # specify a list of file paths for existing configs
 
     # specify params to change for each run to launch consecutive trainings
     # each inner list corresponds to the list of keys, values to change for a particular run
@@ -43,6 +43,8 @@ def setup_config(*args) -> CN:
             cfg.merge_from_file(cfg.CONFIG_FILE)
 
         elif k_fold:
+            # TODO: store everything under 1 run?
+            # https://github.com/IDSIA/sacred/issues/416
             # load params from existing yaml
             cfg.CONFIG_FILE = os.path.join(base_path, "config.yaml")  # edit here
             cfg.merge_from_file(cfg.CONFIG_FILE)
@@ -59,8 +61,18 @@ def setup_config(*args) -> CN:
         # add custom config which override parameter values if they already exist
         # add_custom_config(cfg)
         # add_inference_config(cfg, weights=os.path.join(base_path, "model_best.pth"))
+        cfg.OUTPUT_DIR = "seg_3d/output/"
+        cfg.DATASET.TRAIN_NUM_PATIENTS = 1
+        cfg.DATASET.VAL_NUM_PATIENTS = 1
+        cfg.NUM_WORKERS = 0
+        cfg.SOLVER.MAX_ITER = 5
+        cfg.TEST.FINAL_EVAL_METRICS = ["iou"]
+        cfg.TEST.VIS_PREDS = True
+        cfg.TEST.EVAL_PERIOD = 1
+        cfg.EARLY_STOPPING.PATIENCE = 1
+        cfg.MODEL.DEVICE = 'cpu'
 
-        yield cfg
+        return cfg
 
 
 def add_inference_config(cfg: CN, weights="model_best.pth") -> None:

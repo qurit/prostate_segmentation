@@ -1,6 +1,7 @@
+import torch
 from fvcore.common.config import CfgNode as CN
 
-_C = CN()
+_C = CN(new_allowed=True)
 
 # CfgNodes can only contain a limited set of valid types
 # _VALID_TYPES = {tuple, list, str, int, float, bool, type(None)}
@@ -11,7 +12,7 @@ _C.MODEL = CN()
 _C.MODEL.BACKBONE = CN()
 _C.MODEL.UNET = CN(new_allowed=True)
 
-_C.MODEL.DEVICE = "cuda"
+_C.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else "cuda"
 _C.MODEL.WEIGHTS = ""  # specify path of a .pth file here containing model weights
 _C.MODEL.META_ARCHITECTURE = "SemanticSegNet"
 _C.MODEL.BACKBONE.NAME = "UNet3D"

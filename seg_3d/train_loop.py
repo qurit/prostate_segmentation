@@ -9,6 +9,7 @@ from time import time
 
 import numpy as np
 import torch
+from fvcore.common.config import CfgNode as CN
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 from iopath import PathManager
 from sacred import Experiment
@@ -25,7 +26,7 @@ from seg_3d.modeling.meta_arch.segnet import build_model
 from seg_3d.setup_config import setup_config
 from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
-from seg_3d.utils.logger import setup_logger
+from seg_3d.utils.logger import setup_logger, add_fh
 from seg_3d.utils.scheduler import build_lr_scheduler
 from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
@@ -95,6 +96,9 @@ def train(model):
                                    patience=cfg.EARLY_STOPPING.PATIENCE,
                                    mode=cfg.EARLY_STOPPING.MODE)
     early_stopping.check_is_valid(list(metric_list.metrics.keys()), cfg.DATASET.CLASS_LABELS)
+
+    # setup for automatic mixed precision (AMP) training
+    scaler = GradScaler(enabled=cfg.AMP_ENABLED)
 
     # measuring the time elapsed
     train_start = time()
@@ -231,9 +235,25 @@ def train(model):
 
 
 @ex.main
-def run():
+def main(_config, _run):
     # make training deterministic
-    seed_all(cfg.SEED)
+    cfg.merge_from_other_cfg(CN(_config))   # cfg node lets us use dotted notation
+    seed_all(cfg.seed)
+    name = _run.experiment_info["name"]
+    cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, name)
+    cfg.freeze()  # freeze all parameters
+
+    # save logs to output directory
+    for log in logger_list:
+        add_fh(log, output=cfg.OUTPUT_DIR)
+    logger.info("Starting new run...")
+
+    # create directory to store output files
+    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    cfg_path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
+    with PathManager().open(cfg_path, "w") as f:
+        f.write(cfg.dump())
+    logger.info("Full config saved to {}".format(cfg_path))
 
     # get model and load onto device
     model = build_model(cfg)
@@ -288,48 +308,28 @@ def run():
     return train(model)
 
 
+@ex.config
+def config():
+    ex.add_config(cfg)
+    seed = cfg.SEED
+    tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
+    tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
+
+
 if __name__ == '__main__':
+    cfg = setup_config()
+    logger_list = [
+        setup_logger(name="fvcore"),
+        setup_logger(name=seg_3d.__name__)
+    ]
+    logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
+
+    # sacred
     ex.observers.append(
         MongoObserver(url=f'mongodb://'
                           f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
                           f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
                           f'@localhost:27017/?authMechanism=SCRAM-SHA-1', db_name='db')
     )  # assumes mongo db is running
-
-    cfg_gen = setup_config(
-        sys.argv[1:]  # get config file path from cmd line if any
-    )  # this returns a generator
-
-    for cfg in cfg_gen:
-        cfg.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else cfg.MODEL.DEVICE
-        cfg.freeze()  # freeze all parameters
-
-        # create directory to store output files
-        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-        cfg_path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
-        with PathManager().open(cfg_path, "w") as f:
-            f.write(cfg.dump())
-        ex.add_config(cfg_path)  # add config to sacred experiment
-
-        # setup for automatic mixed precision (AMP) training
-        scaler = GradScaler(enabled=cfg.AMP_ENABLED)
-
-        # setup loggers for the various modules
-        logger_list = [
-            setup_logger(output=cfg.OUTPUT_DIR, name="fvcore"),
-            setup_logger(output=cfg.OUTPUT_DIR, name=seg_3d.__name__)
-        ]
-
-        logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
-        logger.info("Starting new run...")
-        logger.info("Full config saved to {}".format(cfg_path))
-        ex.logger = logger
-
-        # run train loop
-        ex.run(config_updates={"seed": cfg.SEED},
-               options={"--name": os.path.basename(cfg.OUTPUT_DIR),
-                        "--base_dir": cfg.OUTPUT_DIR})
-
-        # cleanup run
-        for log in logger_list:
-            log.handlers.clear()
+    ex.logger = logger
+    ex.run_commandline()

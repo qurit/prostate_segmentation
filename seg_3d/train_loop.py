@@ -4,11 +4,9 @@ import logging
 import os
 import pickle
 import random
-import sys
 from time import time
 
 import numpy as np
-import torch
 from fvcore.common.config import CfgNode as CN
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 from iopath import PathManager
@@ -18,17 +16,19 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 import seg_3d
+from seg_3d.config import get_cfg
 from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
+import seg_3d.modeling.backbone.unet
+import seg_3d.modeling.meta_arch.segnet
 from seg_3d.modeling.meta_arch.segnet import build_model
-from seg_3d.setup_config import setup_config
 from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger, add_fh
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
+from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
 ex = Experiment()
@@ -236,12 +236,30 @@ def train(model):
 
 @ex.main
 def main(_config, _run):
-    # make training deterministic
     cfg.merge_from_other_cfg(CN(_config))   # cfg node lets us use dotted notation
+
+    if cfg.CONFIG_FILE:  # this handles case if path for config file was specified in cmd line
+        logger.warning("Loading existing config file '{}' after initial config setup...".format(cfg.CONFIG_FILE))
+        cfg.merge_from_file(cfg.CONFIG_FILE)
+
+    # make training deterministic
     seed_all(cfg.seed)
     name = _run.experiment_info["name"]
     cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, name)
-    cfg.freeze()  # freeze all parameters
+
+    if cfg.EVAL_ONLY or cfg.PRED_ONLY:
+        # get model weight file if not specified
+        if cfg.MODEL.WEIGHTS is None:
+            cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
+
+        if cfg.EVAL_ONLY:
+            # create a new directory for this eval run
+            cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, "eval_" + str(len(glob.glob("eval*"))))
+        elif cfg.PRED_ONLY:
+            # create a new directory for this pred run
+            cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, "pred_" + str(len(glob.glob("pred*"))))
+
+    cfg.freeze()  # freeze all parameters i.e. no more changes can be made to config
 
     # save logs to output directory
     for log in logger_list:
@@ -310,14 +328,22 @@ def main(_config, _run):
 
 @ex.config
 def config():
-    ex.add_config(cfg)
+    # sacred params
     seed = cfg.SEED
     tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
     tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
 
+    # option to load config from file
+    # cfg.merge_from_file('')  # e.g. seg_3d/config/bladder-detection.yaml
+
+    # changes to pipeline params
+
+    # add to sacred experiment
+    ex.add_config(cfg)
+
 
 if __name__ == '__main__':
-    cfg = setup_config()
+    cfg = get_cfg()
     logger_list = [
         setup_logger(name="fvcore"),
         setup_logger(name=seg_3d.__name__)

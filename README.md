@@ -1,7 +1,7 @@
 # Prostate Lesion Segmentation
 
 ## Usage
-We use Sacred to help manage experiments and for the command line interface. Sacred documentation can be found
+We use Sacred to help manage experiments and for command line interface. Sacred documentation can be found
 here https://sacred.readthedocs.io/en/stable/quickstart.html. Below are the core features we use from Sacred.
 - Specify the name for each experiment via command line with `--name=sample_name` or `-n sample_name`.
 An output directory containing all experiment files will be created with the experiment name.
@@ -28,3 +28,6 @@ Similar to above.
 ```shell
 python -m seg_3d.train_loop --name=test1 with 'PRED_ONLY=True'
 ```
+
+## Docker setup
+To bring up omniboard and mongo database run `docker-compose up`.

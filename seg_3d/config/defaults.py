@@ -119,8 +119,7 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 # -----------------------------------------------------------------------------
 # MISC
 # -----------------------------------------------------------------------------
-_C.SEED = 99
 _C.NUM_WORKERS = 6  # number of workers for the data loaders
-_C.OUTPUT_DIR = "seg_3d/output/"
+_C.OUTPUT_DIR = None
 _C.CONFIG_FILE = None
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

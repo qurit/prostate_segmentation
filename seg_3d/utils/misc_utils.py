@@ -1,5 +1,3 @@
-# original code from https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/utils.py
-# Copyright (c) 2018 Adrian Wolny
 import os
 import random
 from typing import Optional
@@ -33,35 +31,15 @@ def plot_loss(path, storage):
     plt.savefig(path)
 
 
-def find_maximum_patch_size(model, device):
-    """Tries to find the biggest patch size that can be send to GPU for inference
-    without throwing CUDA out of memory"""
-    # logger = get_logger('PatchFinder')
-    in_channels = model.in_channels
-
-    patch_shapes = [(64, 128, 128), (96, 128, 128),
-                    (64, 160, 160), (96, 160, 160),
-                    (64, 192, 192), (96, 192, 192)]
-
-    for shape in patch_shapes:
-        # generate random patch of a given size
-        patch = np.random.randn(*shape).astype('float32')
-
-        patch = torch \
-            .from_numpy(patch) \
-            .view((1, in_channels) + patch.shape) \
-            .to(device)
-
-        # logger.info(f"Current patch size: {shape}")
-        model(patch)
-
-
 def number_of_features_per_level(init_channel_number, num_levels):
     return [init_channel_number * 2 ** k for k in range(num_levels)]
 
 
 def expand_as_one_hot(input, C, ignore_index=None):
     """
+    original code from
+    https://github.com/wolny/pytorch-3dunet/blob/master/pytorch3dunet/unet3d/utils.py
+
     Converts NxSPATIAL label image to NxCxSPATIAL, where each label gets converted to its corresponding one-hot vector.
     It is assumed that the batch dimension is present.
     Args:
@@ -95,26 +73,11 @@ def expand_as_one_hot(input, C, ignore_index=None):
         return torch.zeros(shape).to(input.device).scatter_(1, input, 1)
 
 
-def convert_to_numpy(*inputs):
-    """
-    Coverts input tensors to numpy ndarrays
-
-    Args:
-        inputs (iteable of torch.Tensor): torch tensor
-
-    Returns:
-        tuple of ndarrays
-    """
-
-    def _to_numpy(i):
-        assert isinstance(i, torch.Tensor), "Expected input to be torch.Tensor"
-        return i.detach().cpu().numpy()
-
-    return (_to_numpy(i) for i in inputs)
-
-
 class TrainingSampler(Sampler):
     """
+    original code from
+    https://github.com/facebookresearch/detectron2/blob/master/detectron2/data/samplers/distributed_sampler.py#L15
+
     In training, we only care about the "infinite stream" of training data.
     So this sampler produces an infinite stream of indices
     """

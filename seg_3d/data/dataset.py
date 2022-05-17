@@ -12,8 +12,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
-from seg_3d.data.itk_image_resample import read_scan_as_sitk_image, convert_image_to_npy, \
-    mask_to_sitk_image, combine_pet_ct_image, downsample_image, resample_image, clamp_image_values
+from seg_3d.data.itk_image_resample import *
+from seg_3d.utils.slice_builder import SliceBuilder
 from utils import contour2mask, centre_crop
 
 
@@ -31,7 +31,8 @@ class JointTransform3D:
     """
 
     def __init__(self, test: bool = False, crop: Tuple = None, p_flip: float = None, deform_sigma: float = None,
-                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, multi_scale: List[int] = None, **kwargs):
+                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, multi_scale: List[int] = None,
+                 **kwargs):
         self.crop = crop
         self.p_flip = p_flip
         self.div_by_max = div_by_max
@@ -41,7 +42,8 @@ class JointTransform3D:
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
                 elasticdeform.deform_random_grid([*x, *y], sigma=deform_sigma, points=deform_points,
-                                                 order=[*[3] * len(x), *[0] * len(y)])  # order must be 0 for mask arrays
+                                                 order=[*[3] * len(x),
+                                                        *[0] * len(y)])  # order must be 0 for mask arrays
         else:
             self.deform = lambda x, y: [*x, *y]
 
@@ -122,7 +124,7 @@ class ImageToImage3D(Dataset):
 
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
                  num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
-                 joint_transform: Callable = None, patient_keys: List[str] = None, num_patients: int = None,
+                 joint_transform: Callable = None, patient_keys: List[str] or List[int] = None, num_patients: int = None,
                  patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None,
                  patch_halo: Tuple[int] = None, **kwargs) -> None:
         # convert to a simple dict
@@ -131,7 +133,7 @@ class ImageToImage3D(Dataset):
         # useful inverse mapping which maps roi to modality
         self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
         self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask array
-        self.patient_keys = patient_keys
+        self.patient_keys = patient_keys  # this can either be a list of strings for keys or list of ints for indices
         self.num_slices = num_slices
         self.slice_shape = slice_shape
         self.crop_size = crop_size
@@ -140,6 +142,10 @@ class ImageToImage3D(Dataset):
         self.patch_stride = patch_stride
         self.patch_halo = patch_halo
         self.logger = logging.getLogger(__name__)
+
+        if self.slice_shape is None and len(self.modality) > 1:
+            self.logger.warning("Doing multi channel but 'slice_shape' is set to None! "
+                                "Use 'slice_shape' to specify a common resolution across modalities")
 
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
@@ -153,9 +159,13 @@ class ImageToImage3D(Dataset):
             with open(os.path.join(dp, "global_dict.json")) as file_obj:
                 self.dataset_dict = {**self.dataset_dict, **json.load(file_obj)}
 
-        # if no patients specified then select all from dataset
         if patient_keys is None:
+            # if no patients specified then select all from dataset
             self.patient_keys = list(self.dataset_dict.keys())
+        elif type(patient_keys[0]) is int:
+            # if patient keys param is a list of indices get the keys from dataset
+            all_patients = list(self.dataset_dict.keys())
+            self.patient_keys = [all_patients[idx] for idx in patient_keys]
 
         # sample select patients if num_patients specified
         if num_patients is not None:
@@ -179,14 +189,15 @@ class ImageToImage3D(Dataset):
 
         # if dataset is used during evaluation/testing then disable patch-wise during data fetching
         self.patch_wise = not self.joint_transform.test
-       
+
         if self.patch_wise and self.patch_size is not None:
-            dummy_img = torch.ones((1,self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
-            dummy_msk = torch.ones((len(self.class_labels), self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
-            self.slicer = SliceBuilder([dummy_img], [dummy_msk], self.patch_size,self.patch_stride, None)
+            dummy_img = torch.ones((1, self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
+            dummy_msk = torch.ones(
+                (len(self.class_labels), self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1])
+            )
+            self.slicer = SliceBuilder([dummy_img], [dummy_msk], self.patch_size, self.patch_stride, None)
         else:
             self.slicer = None
-
 
     def __len__(self) -> int:
         if self.patch_wise and self.patch_size is not None:
@@ -220,7 +231,8 @@ class ImageToImage3D(Dataset):
 
         # perform resampling if multi channel/modality is specified
         if {*self.modality} == {"PT", "CT"} and self.slice_shape is not None:
-            reference_size = [*self.slice_shape, raw_image_size_dict["CT"][0]]  # assumes PET and CT have same image spacing in z direction
+            reference_size = [*self.slice_shape,
+                              raw_image_size_dict["CT"][0]]  # assumes PET and CT have same image spacing in z direction
             image = combine_pet_ct_image(pet_image=image_dict["PT"],
                                          ct_image=downsample_image(image_dict["CT"], reference_size))
 
@@ -231,10 +243,10 @@ class ImageToImage3D(Dataset):
 
             for roi in mask_dict:
                 mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image)
-                # convert to npy and keep specified slices
+                # convert to npy
                 mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])
 
-            # convert image to npy, keep specified slices, and set channels as first dimension
+            # convert image to npy and set channels as first dimension
             image = np.moveaxis(
                 convert_image_to_npy(image), source=-1, destination=0
             )
@@ -264,41 +276,17 @@ class ImageToImage3D(Dataset):
         image, mask = self.joint_transform(image, mask)
 
         if self.patch_wise and self.patch_size is not None:
-
             patch_idx = idx % len(self.slicer.raw_slices)
-
             patch_im_slice = self.slicer.raw_slices[patch_idx]
             patch_lab_slice = self.slicer.label_slices[patch_idx]
-
             image, mask = image[patch_im_slice], mask[patch_lab_slice]
-    
+
         return {
             "orig_image": orig_image,
             "image": image.float(),
             "gt_mask": mask.float(),
             "patient": patient
         }
-
-    def get_patch(self, idx: int, image: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        if np.prod(self.patch_wise[:2]) == 1:  # do nothing if patch size is 1x1
-            return image, mask
-
-        # find the patch, indices for a 2x2 grid go like [0, 1; 2, 3]
-        patch_idx = idx % np.prod(self.patch_wise[:2])
-        # compute dimensions of patch
-        m, n = (image.shape[2:] / np.asarray(self.patch_wise[:2])).astype(int)
-        # find the row and column of the patch
-        r, c = patch_idx // self.patch_wise[0], patch_idx % self.patch_wise[1]
-        # handle case if patch size is a single column or row
-        r = 0 if self.patch_wise[0] == 1 else r
-        c = 0 if self.patch_wise[1] == 1 else c
-
-        # gen slice objects, could have option to add padding for overlapping patches here
-        s1 = slice(r * m, (r + 1) * m)
-        s2 = slice(c * n, (c + 1) * n)
-
-        # return the patch from image and mask
-        return image[:, :, s1, s2], mask[:, :, s1, s2]
 
     def get_mask(self, patient: str, image_size_dict: Dict[str, Tuple]) -> dict:
         # get all rois from the dataset
@@ -336,7 +324,7 @@ class ImageToImage3D(Dataset):
 
         # return properly ordered mask based on class labels (while ignoring background)
         return OrderedDict({
-                roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != "Background"
+            roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != "Background"
         })
 
     def process_tumor_mask(self, mask: Dict[str, np.ndarray]) -> None:
@@ -357,104 +345,14 @@ class ImageToImage3D(Dataset):
         # update tumor mask in the mask dict
         mask["Tumor"] = tumor_mask
 
-class SliceBuilder:
-    """
-    Builds the position of the patches in a given raw/label/weight ndarray based on the the patch and stride shape
-    """
-
-    def __init__(self, raw_datasets, label_datasets, patch_shape, stride_shape, weight_dataset, **kwargs):
-        """
-        :param raw_datasets: ndarray of raw data
-        :param label_datasets: ndarray of ground truth labels
-        :param patch_shape: the shape of the patch DxHxW
-        :param stride_shape: the shape of the stride DxHxW
-        :param weight_dataset: ndarray of weights for the labels
-        :param kwargs: additional metadata
-        """
-
-        patch_shape = tuple(patch_shape)
-        stride_shape = tuple(stride_shape)
-        skip_shape_check = kwargs.get('skip_shape_check', False)
-        if not skip_shape_check:
-            self._check_patch_shape(patch_shape)
-
-        self._raw_slices = self._build_slices(raw_datasets[0], patch_shape, stride_shape)
-        if label_datasets is None:
-            self._label_slices = None
-        else:
-            # take the first element in the label_datasets to build slices
-            self._label_slices = self._build_slices(label_datasets[0], patch_shape, stride_shape)
-            assert len(self._raw_slices) == len(self._label_slices)
-        if weight_dataset is None:
-            self._weight_slices = None
-        else:
-            self._weight_slices = self._build_slices(weight_dataset[0], patch_shape, stride_shape)
-            assert len(self.raw_slices) == len(self._weight_slices)
-
-    @property
-    def raw_slices(self):
-        return self._raw_slices
-
-    @property
-    def label_slices(self):
-        return self._label_slices
-
-    @property
-    def weight_slices(self):
-        return self._weight_slices
-
-    @staticmethod
-    def _build_slices(dataset, patch_shape, stride_shape):
-        """Iterates over a given n-dim dataset patch-by-patch with a given stride
-        and builds an array of slice positions.
-        Returns:
-            list of slices, i.e.
-            [(slice, slice, slice, slice), ...] if len(shape) == 4
-            [(slice, slice, slice), ...] if len(shape) == 3
-        """
-        slices = []
-        if dataset.ndim == 4:
-            in_channels, i_z, i_y, i_x = dataset.shape
-        else:
-            i_z, i_y, i_x = dataset.shape
-
-        k_z, k_y, k_x = patch_shape
-        s_z, s_y, s_x = stride_shape
-        z_steps = SliceBuilder._gen_indices(i_z, k_z, s_z)
-        for z in z_steps:
-            y_steps = SliceBuilder._gen_indices(i_y, k_y, s_y)
-            for y in y_steps:
-                x_steps = SliceBuilder._gen_indices(i_x, k_x, s_x)
-                for x in x_steps:
-                    slice_idx = (
-                        slice(z, z + k_z),
-                        slice(y, y + k_y),
-                        slice(x, x + k_x)
-                    )
-                    if dataset.ndim == 4:
-                        slice_idx = (slice(0, in_channels),) + slice_idx
-                    slices.append(slice_idx)
-        return slices
-
-    @staticmethod
-    def _gen_indices(i, k, s):
-        assert i >= k, 'Sample size has to be bigger than the patch size'
-        for j in range(0, i - k + 1, s):
-            yield j
-        if j + k < i:
-            yield i - k
-
-    @staticmethod
-    def _check_patch_shape(patch_shape):
-        assert len(patch_shape) == 3, 'patch_shape must be a 3D tuple'
-        assert patch_shape[1] >= 64 and patch_shape[2] >= 64, 'Height and Width must be greater or equal 64'
-
 
 class Image3D(Dataset):
     """
     Dataset class purely for inference TODO: test me
     """
-    def __init__(self, dataset_path: str or List[str], path_suffix: str = "", transform: Callable = None, **kwargs) -> None:
+
+    def __init__(self, dataset_path: str or List[str], path_suffix: str = "", transform: Callable = None,
+                 **kwargs) -> None:
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
         else:

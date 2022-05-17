@@ -2,23 +2,22 @@ import json
 import logging
 from typing import Callable, List, Tuple
 
-import numpy as np
-import tqdm
 import torch
+import tqdm
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 
-from seg_3d.data.dataset import ImageToImage3D, SliceBuilder
-from seg_3d.evaluation.metrics import MetricList, argmax_dice_score
+from seg_3d.data.dataset import ImageToImage3D
 from seg_3d.evaluation.mask_visualizer import MaskVisualizer
+from seg_3d.evaluation.metrics import MetricList
+from seg_3d.utils.slice_builder import SliceBuilder
 
 
 class Evaluator:
     def __init__(self, device: str, dataset: ImageToImage3D, metric_list: MetricList, loss: Callable = None,
-                 thresholds: List[float] = None, amp_enabled: bool = False, num_workers: int = 0, 
+                 thresholds: List[float] = None, amp_enabled: bool = False, num_workers: int = 0,
                  patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None, patch_halo: Tuple[int] = None,
                  patching_input_size: Tuple[int] = None, patching_label_size: Tuple[int] = None, **kwargs):
-
         self.device = device
         self.dataset = dataset
         self.metric_list = metric_list
@@ -51,9 +50,9 @@ class Evaluator:
 
         inference_dict = {}
         with torch.no_grad():
-
-            for idx, data_input in tqdm.tqdm(enumerate(DataLoader(self.dataset, batch_size=1, num_workers=self.num_workers)),
-                                             total=len(self.dataset), desc="[evaluation progress =>]"):
+            for idx, data_input in tqdm.tqdm(
+                    enumerate(DataLoader(self.dataset, batch_size=1, num_workers=self.num_workers)),
+                    total=len(self.dataset), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"]  # shape is (batch, channel, depth, height, width)
                 labels = data_input["gt_mask"]
@@ -68,18 +67,17 @@ class Evaluator:
                         preds = torch.zeros_like(labels).to(self.device)
                         norms = torch.zeros_like(labels).to(self.device)
 
-                        patient_val_loss = []
-
                         for i in range(len(self.slicer.raw_slices)):
                             X, y = sample.squeeze(0)[self.slicer.raw_slices[i]], labels.squeeze(0)[self.slicer.label_slices[i]]
                             X, y = X.unsqueeze(0).to(self.device), y.unsqueeze(0).to(self.device)
-                            
+
                             y_hat = model(X).detach()
                             y_act = model.final_activation(y_hat)
 
-                            u_prediction, u_index = self.remove_halo(y_act.squeeze(), self.slicer.raw_slices[i], sample.shape[2:], self.patch_halo)
-                            
-                            u_index = (slice(0,1, None), slice(0,2,None)) + u_index[1:]
+                            u_prediction, u_index = self.slicer.remove_halo(y_act.squeeze(), self.slicer.raw_slices[i],
+                                                                            sample.shape[2:], self.patch_halo)
+
+                            u_index = (slice(0, 1, None), slice(0, 2, None)) + u_index[1:]
 
                             preds[u_index] += u_prediction
                             norms[u_index] += 1
@@ -95,7 +93,6 @@ class Evaluator:
                             self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
 
                     else:
-
                         preds = model(sample).detach()
 
                         if self.loss:
@@ -111,6 +108,13 @@ class Evaluator:
                     if self.thresholds:
                         preds[:] = self.threshold_predictions(preds.squeeze(1))
 
+                    # make sure pred and labels have same number of channels
+                    if preds.shape[1] < labels.shape[1]:
+                        shape = list(labels.shape)
+                        shape[1] = labels.shape[1] - preds.shape[1]
+                        preds = torch.cat((preds, torch.zeros(shape).to(self.device)), dim=1)
+
+                    # get scores for all metrics
                     self.metric_list(preds, labels)
 
                     # print out results for patient
@@ -157,43 +161,6 @@ class Evaluator:
         ]
 
         return torch.stack(new_preds)
-    
-    @staticmethod
-    def remove_halo(patch, index, shape, patch_halo):
-        """
-        Remove `pad_width` voxels around the edges of a given patch.
-        """
-        assert len(patch_halo) == 3
-
-        def _new_slices(slicing, max_size, pad):
-            if slicing.start == 0:
-                p_start = 0
-                i_start = 0
-            else:
-                p_start = pad
-                i_start = slicing.start + pad
-
-            if slicing.stop == max_size:
-                p_stop = None
-                i_stop = max_size
-            else:
-                p_stop = -pad if pad != 0 else 1
-                i_stop = slicing.stop - pad
-
-            return slice(p_start, p_stop), slice(i_start, i_stop)
-
-        D, H, W = shape
-
-        i_c, i_z, i_y, i_x = index
-        p_c = slice(0, patch.shape[0])
-
-        p_z, i_z = _new_slices(i_z, D, patch_halo[0])
-        p_y, i_y = _new_slices(i_y, H, patch_halo[1])
-        p_x, i_x = _new_slices(i_x, W, patch_halo[2])
-
-        patch_index = (p_c, p_z, p_y, p_x)
-        index = (i_c, i_z, i_y, i_x)
-        return patch[patch_index], index
 
     def set_mask_visualizer(self, class_labels, plot_dir):
         self.mask_visualizer = MaskVisualizer(class_labels=class_labels, root_plot_dir=plot_dir, save_figs=True)

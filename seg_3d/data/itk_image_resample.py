@@ -3,6 +3,16 @@ from typing import List
 import SimpleITK as sitk
 import numpy as np
 
+__all__ = [
+    "read_scan_as_sitk_image",
+    "downsample_image",
+    "combine_pet_ct_image",
+    "convert_image_to_npy",
+    "resample_image",
+    "mask_to_sitk_image",
+    "clamp_image_values"
+]
+
 
 def read_scan_as_sitk_image(dcm_dir: str) -> sitk.Image:
     """ Thanks to https://discourse.itk.org/t/compose-image-from-different-modality-with-different-number-of-slices/2286/8 """

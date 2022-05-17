@@ -1,6 +1,7 @@
+import torch
 from fvcore.common.config import CfgNode as CN
 
-_C = CN()
+_C = CN(new_allowed=True)
 
 # CfgNodes can only contain a limited set of valid types
 # _VALID_TYPES = {tuple, list, str, int, float, bool, type(None)}
@@ -11,7 +12,7 @@ _C.MODEL = CN()
 _C.MODEL.BACKBONE = CN()
 _C.MODEL.UNET = CN(new_allowed=True)
 
-_C.MODEL.DEVICE = "cuda"
+_C.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else "cuda"
 _C.MODEL.WEIGHTS = ""  # specify path of a .pth file here containing model weights
 _C.MODEL.META_ARCHITECTURE = "SemanticSegNet"
 _C.MODEL.BACKBONE.NAME = "UNet3D"
@@ -37,11 +38,11 @@ _C.DATASET.PARAMS.modality_roi_map = [{"CT": ["Bladder"]}]
 _C.DATASET.PARAMS.num_slices = None  # number of slices in axial plane, if None then selects shortest scan length from dataset
 _C.DATASET.PARAMS.crop_size = None  # size of centre crop, if None then no centre cropping done
 
-_C.DATASET.PARAMS.patch_size = None # 3 dim tuple for patch size
-_C.DATASET.PARAMS.patch_stride = None # 3 dim tuple for patch stride (how far to move between patches)
-_C.DATASET.PARAMS.patch_halo = None # 3 dim tuple for size of halo to be removed from patches
-_C.DATASET.PARAMS.patching_input_size = None # Tuple describing original image input size before patching
-_C.DATASET.PARAMS.patching_label_size = None # Tuple describing original labels/mask size before patching
+_C.DATASET.PARAMS.patch_size = None  # 3 dim tuple for patch size
+_C.DATASET.PARAMS.patch_stride = None  # 3 dim tuple for patch stride (how far to move between patches)
+_C.DATASET.PARAMS.patch_halo = None  # 3 dim tuple for size of halo to be removed from patches
+_C.DATASET.PARAMS.patching_input_size = None  # Tuple describing original image input size before patching
+_C.DATASET.PARAMS.patching_label_size = None  # Tuple describing original labels/mask size before patching
 
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 
@@ -100,7 +101,7 @@ _C.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []
 _C.TEST.FINAL_EVAL_METRICS = []  # metrics to compute for the final eval step at the end of training
-_C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation
+_C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation, set to None to disable saving
 _C.TEST.THRESHOLDS = None
 # option to visualize predictions using the mask visualizer
 # if in training mode, will only visualize masks at the end of the main train loop
@@ -118,8 +119,7 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 # -----------------------------------------------------------------------------
 # MISC
 # -----------------------------------------------------------------------------
-_C.SEED = 99
 _C.NUM_WORKERS = 6  # number of workers for the data loaders
-_C.OUTPUT_DIR = "./output"
+_C.OUTPUT_DIR = None
 _C.CONFIG_FILE = None
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

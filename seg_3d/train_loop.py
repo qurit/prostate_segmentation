@@ -4,33 +4,35 @@ import logging
 import os
 import pickle
 import random
-import sys
 from time import time
 
 import numpy as np
-import torch
 from fvcore.common.config import CfgNode as CN
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 from iopath import PathManager
 from sacred import Experiment
+from sacred import SETTINGS
 from sacred.observers import MongoObserver
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 import seg_3d
+from seg_3d.config import get_cfg
 from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
+import seg_3d.modeling.backbone.unet
+import seg_3d.modeling.meta_arch.segnet
 from seg_3d.modeling.meta_arch.segnet import build_model
-from seg_3d.setup_config import setup_config
 from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger, add_fh
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss, zip_files_in_dir
+from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
+SETTINGS.CONFIG.READ_ONLY_CONFIG = False  # allows us to update config based on run name
 ex = Experiment()
 
 
@@ -111,8 +113,8 @@ def train(model):
                     range(start_iter, max_iter),
                     DataLoader(
                         train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH,
-                        num_workers=cfg.NUM_WORKERS, worker_init_fn=random.seed(cfg.SEED),
-                        sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.SEED))
+                        num_workers=cfg.NUM_WORKERS, worker_init_fn=random.seed(cfg.seed),
+                        sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.seed))
             ):
 
                 storage.iter = iteration
@@ -236,12 +238,34 @@ def train(model):
 
 @ex.main
 def main(_config, _run):
+    cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line
+
     # make training deterministic
-    cfg.merge_from_other_cfg(CN(_config))   # cfg node lets us use dotted notation
     seed_all(cfg.seed)
     name = _run.experiment_info["name"]
-    cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, name)
-    cfg.freeze()  # freeze all parameters
+    base_dir = os.path.join("seg_3d/output", name)
+
+    if cfg.EVAL_ONLY or cfg.PRED_ONLY and not cfg.MODEL.WEIGHTS:
+        # get model weight file if not specified
+        cfg.MODEL.WEIGHTS = os.path.join(base_dir, "model_best.pth")
+        assert os.path.isfile(cfg.MODEL.WEIGHTS)
+
+    if cfg.OUTPUT_DIR is None:
+        if cfg.EVAL_ONLY:
+            # create a new directory for this eval run
+            prefix = str(len(glob.glob(os.path.join(base_dir, "eval*"))))
+            cfg.OUTPUT_DIR = os.path.join(base_dir, "eval_" + prefix)
+        elif cfg.PRED_ONLY:
+            # create a new directory for this pred run
+            prefix = str(len(glob.glob(os.path.join(base_dir, "pred*"))))
+            cfg.OUTPUT_DIR = os.path.join(base_dir, "pred_" + prefix)
+        else:
+            cfg.OUTPUT_DIR = base_dir
+
+    cfg.freeze()  # freeze all parameters i.e. no more changes can be made to config
+    # make sure latest version of config is saved to mongo db
+    if ex.observers != 0:
+        ex.observers[0].run_entry["config"] = cfg
 
     # save logs to output directory
     for log in logger_list:
@@ -310,25 +334,33 @@ def main(_config, _run):
 
 @ex.config
 def config():
+    # pipeline params
+    # cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
+    # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+
+    # add to sacred experiment
     ex.add_config(cfg)
-    seed = cfg.SEED
+
+    # sacred params
+    seed = 99  # comment this out to disable deterministic experiments
     tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
     tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
 
 
 if __name__ == '__main__':
-    cfg = setup_config()
+    cfg = get_cfg()  # config global variable
     logger_list = [
         setup_logger(name="fvcore"),
         setup_logger(name=seg_3d.__name__)
     ]
     logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
 
-    # sacred
+    # mongo observer
     ex.observers.append(
         MongoObserver(url=f'mongodb://'
-                          f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
-                          f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
+                          'sample:password'
+                          # f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
+                          # f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
                           f'@localhost:27017/?authMechanism=SCRAM-SHA-1', db_name='db')
     )  # assumes mongo db is running
     ex.logger = logger

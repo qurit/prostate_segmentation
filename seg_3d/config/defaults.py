@@ -1,6 +1,7 @@
+import torch
 from fvcore.common.config import CfgNode as CN
 
-_C = CN()
+_C = CN(new_allowed=True)
 
 # CfgNodes can only contain a limited set of valid types
 # _VALID_TYPES = {tuple, list, str, int, float, bool, type(None)}
@@ -11,7 +12,7 @@ _C.MODEL = CN()
 _C.MODEL.BACKBONE = CN()
 _C.MODEL.UNET = CN(new_allowed=True)
 
-_C.MODEL.DEVICE = "cuda"
+_C.MODEL.DEVICE = "cpu" if not torch.cuda.is_available() else "cuda"
 _C.MODEL.WEIGHTS = ""  # specify path of a .pth file here containing model weights
 _C.MODEL.META_ARCHITECTURE = "SemanticSegNet"
 _C.MODEL.BACKBONE.NAME = "UNet3D"
@@ -100,7 +101,7 @@ _C.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []
 _C.TEST.FINAL_EVAL_METRICS = []  # metrics to compute for the final eval step at the end of training
-_C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation
+_C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation, set to None to disable saving
 _C.TEST.THRESHOLDS = None
 # option to visualize predictions using the mask visualizer
 # if in training mode, will only visualize masks at the end of the main train loop
@@ -118,8 +119,7 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 # -----------------------------------------------------------------------------
 # MISC
 # -----------------------------------------------------------------------------
-_C.SEED = 99
 _C.NUM_WORKERS = 6  # number of workers for the data loaders
-_C.OUTPUT_DIR = "./output"
+_C.OUTPUT_DIR = None
 _C.CONFIG_FILE = None
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

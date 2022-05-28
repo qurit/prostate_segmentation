@@ -101,7 +101,7 @@ _C.TEST.EVAL_PERIOD = 20  # The period (in terms of steps) to evaluate the model
 # if none specified only val_loss is computed
 _C.TEST.EVAL_METRICS = []
 _C.TEST.FINAL_EVAL_METRICS = []  # metrics to compute for the final eval step at the end of training
-_C.TEST.INFERENCE_FILE_NAME = "inference.pk"  # name of file which stores results from evaluation, set to None to disable saving
+_C.TEST.INFERENCE_FILE_NAME = None  # "inference.pk"  # name of file which stores results from evaluation, set to None to disable saving
 _C.TEST.THRESHOLDS = None
 # option to visualize predictions using the mask visualizer
 # if in training mode, will only visualize masks at the end of the main train loop

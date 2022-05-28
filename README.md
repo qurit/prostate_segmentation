@@ -22,6 +22,11 @@ which loads an existing configuration file needs to be done inside the `config()
 python -m seg_3d.train_loop --name=test1
 ```
 
+To resume training from a previously started run, run the following command keeping the same experiment name.
+```shell
+python -m seg_3d.train_loop --name=test1 with 'RESUME=True'
+```
+
 ### Evaluation
 In evaluation mode, use the same name as the training run and set the parameter `EVAL_ONLY` to true.
 This will create a new directory prefixed **eval** inside the training run and will use by default

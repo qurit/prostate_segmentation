@@ -262,8 +262,10 @@ def main(_config, _run):
         else:
             cfg.OUTPUT_DIR = base_dir
 
-    _config = cfg  # this makes sure latest version of config is saved to mongo db
     cfg.freeze()  # freeze all parameters i.e. no more changes can be made to config
+    # make sure latest version of config is saved to mongo db
+    if ex.observers != 0:
+        ex.observers[0].run_entry["config"] = cfg
 
     # save logs to output directory
     for log in logger_list:
@@ -344,6 +346,7 @@ def config():
     tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
     tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
 
+
 if __name__ == '__main__':
     cfg = get_cfg()  # config global variable
     logger_list = [
@@ -355,8 +358,9 @@ if __name__ == '__main__':
     # mongo observer
     ex.observers.append(
         MongoObserver(url=f'mongodb://'
-                          f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
-                          f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
+                          'sample:password'
+                          # f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
+                          # f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
                           f'@localhost:27017/?authMechanism=SCRAM-SHA-1', db_name='db')
     )  # assumes mongo db is running
     ex.logger = logger

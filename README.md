@@ -8,7 +8,14 @@ An output directory containing all experiment files will be created with the exp
 - Comments associated with an experiment can be added in the command line with `-c` followed by
 comment in single quotes.
 - Changes to parameters in the config can be changed on the fly via command line keyword `with` followed
-by the key value pair parameters, e.g. `with 'a=2.3' 'b="FooBar"' 'c=True'`
+by the key value pair parameters, e.g. `with 'a=2.3' 'b="FooBar"' 'c=True'`. Note changing the parameter `CONFIG_FILE`
+which loads an existing configuration file needs to be done inside the `config()` function, i.e.
+    ```python
+    @ex.config
+    def config():
+        cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
+        cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+    ```
 
 ### Train
 ```shell
@@ -29,5 +36,14 @@ Similar to above.
 python -m seg_3d.train_loop --name=test1 with 'PRED_ONLY=True'
 ```
 
-## Docker setup
-To bring up omniboard and mongo database run `docker-compose up`.
+## Sacred setup
+1. Install docker https://docs.docker.com/get-docker/
+2. Bring up omniboard and mongo database run `docker compose up` (or `docker-compose up`).
+
+### Useful notes
+- To create a new image from a container's changes and then push to registry.
+    ```shell
+    docker commit <container-id> myname/containername:version
+    docker push <image-id>
+    ```
+- omniboard docs https://github.com/vivekratnavel/omniboard/blob/master/docs/quick-start.md 

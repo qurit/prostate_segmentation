@@ -41,9 +41,13 @@ python -m seg_3d.train_loop --name=test1 with 'PRED_ONLY=True'
 2. Bring up omniboard and mongo database run `docker compose up` (or `docker-compose up`).
 
 ### Useful notes
-- To create a new image from a container's changes and then push to registry.
+- To create a new image from a container's changes and then push to registry (note this step does not work
+to do a backup of mongo db).
     ```shell
     docker commit <container-id> myname/containername:version
     docker push <image-id>
     ```
-- omniboard docs https://github.com/vivekratnavel/omniboard/blob/master/docs/quick-start.md 
+- The mongo docker image writes data into a [volume](https://docs.docker.com/storage/volumes/)
+- One way to do a backup of mongo db is via [mongodump](https://www.mongodb.com/docs/database-tools/mongodump/)
+and then copying the file over from the container
+- Omniboard docs https://github.com/vivekratnavel/omniboard/blob/master/docs/quick-start.md 

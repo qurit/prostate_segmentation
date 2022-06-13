@@ -96,6 +96,23 @@ def setup_logger(
     return logger
 
 
+def add_fh(logger, output):
+    plain_formatter = logging.Formatter(
+        "[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S"
+    )
+
+    if output.endswith(".txt") or output.endswith(".log"):
+        filename = output
+    else:
+        filename = os.path.join(output, "log.txt")
+    PathManager.mkdirs(os.path.dirname(filename))
+
+    fh = logging.StreamHandler(_cached_log_stream(filename))
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(plain_formatter)
+    logger.addHandler(fh)
+
+
 # cache the opened file object, so that different calls to `setup_logger`
 # with the same file name can safely write to the same file.
 @functools.lru_cache(maxsize=None)

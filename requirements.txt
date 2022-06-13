@@ -17,3 +17,5 @@ tensorboard
 torchaudio
 torchvision
 tqdm
+sacred
+pymongo

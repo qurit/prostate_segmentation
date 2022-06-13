@@ -60,12 +60,21 @@ class JointTransform3D:
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
-        # add channel for background
+        # # add channel for background pet & ct
+        # bg_pt = np.ones_like(masks[1])
+        # bg_ct = np.ones_like(masks[0])
+        # for idx, m in enumerate(masks):
+        #     if idx in [1,2,3]:
+        #         bg_pt[bg_pt == m] = 0
+        #     else:
+        #         bg_ct[bg_ct == m] = 1
+        # masks = [bg_pt, bg_ct, *masks]
+
         bg = np.ones_like(masks[0])
         for m in masks:
             bg[bg == m] = 0
         masks = [bg, *masks]
-
+        
         # transforming to tensor
         image = torch.Tensor(np.array(image))
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))

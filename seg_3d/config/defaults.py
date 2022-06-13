@@ -122,4 +122,5 @@ _C.SEED = 99
 _C.NUM_WORKERS = 6  # number of workers for the data loaders
 _C.OUTPUT_DIR = "./output"
 _C.CONFIG_FILE = None
+_C.UNSUPERVISED = False
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

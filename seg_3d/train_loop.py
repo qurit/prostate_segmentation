@@ -117,8 +117,8 @@ def train(model):
                         sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.seed))
             ):
 
-                storage.iter = iteration
-                sample = batched_inputs["image"]
+                storage.step()
+                sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
                 data = {'labels': labels,
                         'dist_map': batched_inputs["dist_map"].to(cfg.MODEL.DEVICE)}
@@ -345,6 +345,7 @@ def config():
     seed = 99  # comment this out to disable deterministic experiments
     tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
     tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
+
 
 if __name__ == '__main__':
     cfg = get_cfg()  # config global variable

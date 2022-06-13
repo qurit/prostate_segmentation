@@ -210,8 +210,12 @@ def train(model):
 
             # run final evaluation with best model
             model_checkpoint = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
+
             if cfg.TEST.FINAL_EVAL_METRICS and model_checkpoint in checkpointer.get_all_checkpoint_files():
                 logger.info("Running final evaluation with best model...")
+
+                # add weight file to db
+                ex.add_artifact(os.path.join(cfg.OUTPUT_DIR, "model_best.pth"), content_type="weights")
                 # load best model
                 checkpointer.load(model_checkpoint, checkpointables=["model"])
 
@@ -247,7 +251,7 @@ def main(_config, _run):
     name = _run.experiment_info["name"]
     base_dir = os.path.join("seg_3d/output", name)
 
-    if cfg.EVAL_ONLY or cfg.PRED_ONLY and not cfg.MODEL.WEIGHTS:
+    if any([cfg.EVAL_ONLY, cfg.PRED_ONLY, cfg.RESUME]) and not cfg.MODEL.WEIGHTS:
         # get model weight file if not specified
         cfg.MODEL.WEIGHTS = os.path.join(base_dir, "model_best.pth")
         assert os.path.isfile(cfg.MODEL.WEIGHTS)
@@ -264,8 +268,10 @@ def main(_config, _run):
         else:
             cfg.OUTPUT_DIR = base_dir
 
-    _config = cfg  # this makes sure latest version of config is saved to mongo db
     cfg.freeze()  # freeze all parameters i.e. no more changes can be made to config
+    # make sure latest version of config is saved to mongo db
+    if ex.observers != 0:
+        ex.observers[0].run_entry["config"] = cfg
 
     # save logs to output directory
     for log in logger_list:
@@ -346,7 +352,6 @@ def config():
     tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
     tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
 
-
 if __name__ == '__main__':
     cfg = get_cfg()  # config global variable
     logger_list = [
@@ -358,10 +363,9 @@ if __name__ == '__main__':
     # mongo observer
     ex.observers.append(
         MongoObserver(url=f'mongodb://'
+                          'sample:password'
                           # f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
-                           f'{"sample"}:'
                           # f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
-                          f'{"password"}'
                           f'@localhost:27017/?authMechanism=SCRAM-SHA-1', db_name='db')
     )  # assumes mongo db is running
     ex.logger = logger

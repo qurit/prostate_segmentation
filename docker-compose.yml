@@ -1,0 +1,30 @@
+version: '2'
+services:
+
+  mongo:
+    env_file: .env
+    image: rdesc/mongo  # set to mongo for original image
+    ports:
+      - 127.0.0.1:27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: $MONGO_INITDB_ROOT_USERNAME
+      MONGO_INITDB_ROOT_PASSWORD: $MONGO_INITDB_ROOT_PASSWORD
+      MONGO_INITDB_DATABASE: db
+    expose:
+      - 27017
+    networks:
+      - omniboard
+
+  omniboard:
+    env_file: .env
+    image: vivekratnavel/omniboard:latest
+    command: ["--mu", "mongodb://$MONGO_INITDB_ROOT_USERNAME:$MONGO_INITDB_ROOT_PASSWORD@mongo:27017/db?authSource=admin"]
+    ports:
+      - 127.0.0.1:9000:9000
+    networks:
+      - omniboard
+    depends_on:
+      - mongo
+
+networks:
+  omniboard:

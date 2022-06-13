@@ -9,8 +9,8 @@ from fvcore.common.registry import Registry
 from torch import nn as nn, einsum
 from torch.autograd import Variable
 
-from typing import Iterable, Set, cast
 
+from typing import Iterable, Set, cast
 from seg_3d.utils.misc_utils import expand_as_one_hot
 
 LOSS_REGISTRY = Registry('LOSS')
@@ -71,28 +71,9 @@ class SurfaceLoss:
     def __init__(self, idc=None):
         self.idc = idc
 
-    @staticmethod
-    def uniq(a: torch.Tensor) -> Set:
-        return set(torch.unique(a.cpu()).numpy())
-
-    def sset(self, a: torch.Tensor, sub: Iterable) -> bool:
-        return self.uniq(a).issubset(sub)
-
-    @staticmethod
-    def simplex(t: torch.Tensor, axis=1) -> bool:
-        _sum = cast(torch.Tensor, t.sum(axis).type(torch.float32))
-        _ones = torch.ones_like(_sum, dtype=torch.float32)
-        return torch.allclose(_sum, _ones)
-
-    def one_hot(self, t: torch.Tensor, axis=1) -> bool:
-        return self.simplex(t, axis) and self.sset(t, [0, 1])
-
     def __call__(self, probs: torch.Tensor, dist_maps: torch.Tensor) -> torch.Tensor:
 
         probs = nn.Softmax(dim=1)(probs)
-
-        assert self.simplex(probs)
-        assert not self.one_hot(dist_maps)
 
         pc = probs.type(torch.float32)
         dc = dist_maps.type(torch.float32)
@@ -101,10 +82,7 @@ class SurfaceLoss:
             pc = pc[:, self.idc, ...]
             dc = dc[:, self.idc, ...]
 
-        if len(probs.shape) > 4:
-            multipled = einsum("bkxyz,bkxyz->bkxyz", pc, dc)
-        else:
-            multipled = einsum("bkwh,bkwh->bkwh", pc, dc)
+        multipled = einsum("bkxyz,bkxyz->bkxyz", pc, dc)
 
         loss = multipled.mean()
 

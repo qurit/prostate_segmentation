@@ -46,9 +46,9 @@ class MetricList:
 
         for key, value in self.results.items():
             if type(value[0]) == torch.Tensor and value[0].is_cuda:
-                value = np.asarray([x.detach().cpu().numpy() for x in value]).mean(axis=0).tolist()
+                value = np.nanmean(np.asarray([x.detach().cpu().numpy() for x in value]), axis=0).tolist()
             else:
-                value = np.asarray([np.asarray(x) for x in value]).mean(axis=0).tolist()
+                value = np.nanmean(np.asarray([np.asarray(x) for x in value]), axis=0).tolist()
 
             if type(value) is list:
                 for i in range(len(value)):
@@ -69,10 +69,14 @@ def ssim(pred, gt):
 
 @METRIC_REGISTRY.register()
 def hausdorff(pred, gt):
-    return [
-        hausdorff_distance(im1, im2)
-        for im1, im2 in zip(pred.squeeze().cpu().numpy(), gt.squeeze().cpu().numpy())
-    ]
+    orig_shape = pred.shape
+    pred = pred.cpu().argmax(axis=1)
+    pred[pred != 1] = 0
+    im1 = pred.numpy().squeeze()
+#    pred = torch.nn.functional.one_hot(pred).view(*orig_shape)
+    im2 = gt.squeeze().cpu().numpy()[1]
+
+    return hausdorff_distance(im1, im2)
 
 
 @METRIC_REGISTRY.register()
@@ -127,7 +131,7 @@ def overlap(pred, gt):
 
     gt = gt[:, 2, :, :, :]
 
-    return (pred * gt).sum() / gt.shape[0]
+    return (pred * gt).sum() / gt.sum()
 
 
 @METRIC_REGISTRY.register()

@@ -3,7 +3,7 @@ import torch.nn as nn
 from fvcore.common.registry import Registry
 
 from seg_3d.modeling.backbone.buildingblocks import DoubleConv, ExtResNetBlock, create_encoders, create_decoders
-from seg_3d.utils.seg_utils import number_of_features_per_level
+from seg_3d.utils.misc_utils import number_of_features_per_level
 
 BACKBONE_REGISTRY = Registry('BACKBONE')
 

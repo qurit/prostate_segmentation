@@ -78,10 +78,7 @@ class SurfaceLoss:
             pc = pc[:, self.idc, ...]
             dc = dc[:, self.idc, ...]
 
-        if len(probs.shape) > 4:
-            multipled = einsum("bkxyz,bkxyz->bkxyz", pc, dc)
-        else:
-            multipled = einsum("bkwh,bkwh->bkwh", pc, dc)
+        multipled = einsum("bkxyz,bkxyz->bkxyz", pc, dc)
 
         loss = multipled.mean()
 

@@ -17,6 +17,12 @@ which loads an existing configuration file needs to be done inside the `config()
         cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     ```
 
+We also use tensorboard to visualize the inputs and outputs of the model during train time. To bring up tensorboard
+dashboard run the following command, where **output-dir** is the path to the directory storing the training runs
+```shell
+tensorboard --logdir ouput-dir
+```
+
 ### Train
 ```shell
 python -m seg_3d.train_loop --name=test1

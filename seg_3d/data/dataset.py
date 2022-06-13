@@ -31,13 +31,13 @@ class JointTransform3D:
     """
 
     def __init__(self, test: bool = False, crop: Tuple = None, p_flip: float = None, deform_sigma: float = None,
-                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, multi_scale: List[int] = None,
+                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, multi_scale: Tuple = None,
                  **kwargs):
         self.crop = crop
         self.p_flip = p_flip
         self.div_by_max = div_by_max
         self.test = test
-        self.multi_scale = multi_scale
+        self.multi_scale = multi_scale  # min and max scaling factors
 
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
@@ -75,10 +75,10 @@ class JointTransform3D:
             if not self.test:
 
                 if self.multi_scale is not None:
-                    scale_factor = np.random.choice(self.multi_scale, 1)
+                    scale_factor = np.random.uniform(*self.multi_scale)
                     orig_shape = image.shape[-2:]
-                    new_shape = (scale_factor * orig_shape).astype(int).tolist()
-                    image, mask = T.Resize(new_shape)(image), T.Resize(new_shape)(mask)
+                    new_shape = (scale_factor * np.asarray(orig_shape)).astype(int).tolist()
+                    image, mask = T.Resize(new_shape)(image), T.Resize(new_shape, interpolation=0)(mask)
 
                 i, j, h, w = T.RandomCrop.get_params(image, self.crop)
                 image, mask = F.crop(image, i, j, h, w), F.crop(mask, i, j, h, w)
@@ -133,6 +133,7 @@ class ImageToImage3D(Dataset):
         # useful inverse mapping which maps roi to modality
         self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
         self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask array
+        assert len(class_labels) > 0
         self.patient_keys = patient_keys  # this can either be a list of strings for keys or list of ints for indices
         self.num_slices = num_slices
         self.slice_shape = slice_shape

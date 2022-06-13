@@ -3,15 +3,12 @@ MODEL:
   UNET:
     out_channels: 3  # channels are background, bladder, tumor
 LOSS:
-  FN: BCEDiceWithOverlapLoss
+  FN: BoundaryLoss
   PARAMS:
-    bce_weight: 1.
     dice_weight: 1.
-    overlap_weight: 10.
-    overlap_idx: (1, 2)  # tuple containing channel indices of pred, gt for overlap computation
-                         # (pred bladder channel, gt tumor channel)
-    class_weight: [0, 1, 1]  # set weight for background to 0
+    surface_weight: 0.01
     normalization: sigmoid
+    surface_idc: [1, 2]
 TRANSFORMS:
   div_by_max: True
 DATASET:
@@ -29,7 +26,7 @@ DATASET:
     crop_size:
       - 140
       - 140
-    num_slices: 128
+    num_slices: 64
     modality_roi_map:
       - PT:
         # merges tumor rois Tumor, Tumor2, Tumor3

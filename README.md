@@ -49,7 +49,12 @@ python -m seg_3d.train_loop --name=test1 with 'PRED_ONLY=True'
 
 ## Sacred setup
 1. Install docker https://docs.docker.com/get-docker/
-2. Bring up omniboard and mongo database run `docker compose up` (or `docker-compose up`).
+2. Bring up omniboard and mongo database run `sudo docker compose up` (or `docker-compose up`) from the repo root directory.
+3. Open http://localhost:9000/ in the browser. Port number is specified in the docker-compose.yml file
+    ```yaml
+        ports:
+          - 127.0.0.1:9000:9000
+    ```
 
 ### Useful notes
 - To create a new image from a container's changes and then push to registry (note this step does not work

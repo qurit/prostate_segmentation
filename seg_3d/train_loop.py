@@ -315,6 +315,9 @@ def main(_config, _run):
             )
 
         results = evaluator.evaluate(model)
+        for k, v in results["metrics"].items():
+            # add to sacred experiment
+            ex.log_scalar(k, float(v), step=0)
         # save inference results
         with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
             pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)

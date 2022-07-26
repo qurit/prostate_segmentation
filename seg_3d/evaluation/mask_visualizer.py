@@ -58,7 +58,8 @@ class MaskVisualizer:
 
     def plot_mask_predictions(
             self, patient: str, sample: np.ndarray, pred_dict: Dict[str, np.ndarray] or np.ndarray,
-            gt: np.ndarray, gt_overlay: bool = False, skip_bkg: bool = True, show_slice_scores: bool = True
+            gt: np.ndarray, gt_overlay: bool = False, skip_bkg: bool = True, show_slice_scores: bool = True,
+            plane: str = None,
     ) -> None:
         """
         Generates a plot showing original sample, ground truth and prediction masks for each slice
@@ -71,6 +72,7 @@ class MaskVisualizer:
             gt_overlay: option to overlay the ground truth mask with the prediction
             skip_bkg: option to skip the first channel in gt and pred_dict which is the background channel
             show_slice_scores: option to show dice score and pixel sum for each slice
+            plane: the anatomical plane in which to do slicing, options are 'tra' (default), 'sag' or 'cor'
         """
         # handle case where only have 1 set of predictions
         if not isinstance(pred_dict, dict) and len(self.algos) == 1 and isinstance(pred_dict, np.ndarray):
@@ -87,6 +89,18 @@ class MaskVisualizer:
 
         if not self.class_labels:
             self.class_labels = [""] * len(gt)
+
+        # handle case for viewing slices in specified plane
+        if plane == "cor":  # Coronal
+            sample = np.rot90(np.swapaxes(sample, -3, -2), k=2, axes=(-2, -1))
+            pred_dict = {k: np.rot90(np.swapaxes(v, -3, -2), k=2, axes=(-2, -1)) for k, v in pred_dict.items()}
+            gt = np.rot90(np.swapaxes(gt, -3, -2), k=2, axes=(-2, -1))
+        elif plane == "sag":  # Sagittal
+            sample = np.rot90(np.swapaxes(sample, -3, -1), k=1, axes=(-2, -1))
+            pred_dict = {k: np.rot90(np.swapaxes(v, -3, -1), k=1, axes=(-2, -1)) for k, v in pred_dict.items()}
+            gt = np.rot90(np.swapaxes(gt, -3, -1), k=1, axes=(-2, -1))
+        else:
+            pass  # nothing to do for Axial / Transverse plane
 
         # check sample, pred, and gt all have same depth size
         num_slices = sample.shape[0] if len(sample.shape) == 3 else sample.shape[1]
@@ -222,6 +236,10 @@ class MaskVisualizer:
 
                     # show pred
                     axs[a, b].imshow(pred_im, interpolation="none", alpha=pred_alpha, zorder=self.plot_ordering[label])
+
+            # set aspect to equal for all subplots
+            for ax in axs.flatten():
+                ax.set_aspect("equal")
 
             fig.suptitle("%s Order: %.0f" % (patient, i))
             # add legend for the prediction masks

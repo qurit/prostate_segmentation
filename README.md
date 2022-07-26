@@ -41,6 +41,18 @@ the file `model_best.pth` as the weight file.
 python -m seg_3d.train_loop --name=test1 with 'EVAL_ONLY=True'
 ```
 
+To generate plots of the mask predictions along with the samples and ground truth labels, set the following
+parameter in the config to true
+```yaml
+TEST:
+    VIS_PREDS: true
+```
+Another option is to run the mask visualizer in standalone using the script `visualize_preds.py`.
+Here you need to specify the path to the output directory and the class labels.
+```shell
+python -m seg_3d.evaluation.visualize_preds
+```
+
 ### Inference
 Similar to above.
 ```shell

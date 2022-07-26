@@ -251,6 +251,9 @@ def main(_config, _run):
     name = _run.experiment_info["name"]
     base_dir = os.path.join("seg_3d/output", name)
 
+    if cfg.DATASET.FOLD is not None:
+        base_dir = os.path.join(base_dir, str(cfg.DATASET.FOLD))
+
     if any([cfg.EVAL_ONLY, cfg.PRED_ONLY, cfg.RESUME]) and not cfg.MODEL.WEIGHTS:
         # get model weight file if not specified
         cfg.MODEL.WEIGHTS = os.path.join(base_dir, "model_best.pth")
@@ -281,6 +284,12 @@ def main(_config, _run):
     # create directory to store output files
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     cfg_path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
+
+    # check if file already exists
+    if os.path.isfile(cfg_path):
+        logger.warning("Config file {} already exists! Renaming old one...".format(cfg_path))
+        os.rename(cfg_path, cfg_path + ".bk")
+
     with PathManager().open(cfg_path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(cfg_path))
@@ -317,6 +326,9 @@ def main(_config, _run):
             )
 
         results = evaluator.evaluate(model)
+        for k, v in results["metrics"].items():
+            # add to sacred experiment
+            ex.log_scalar(k, float(v), step=0)
         # save inference results
         with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
             pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -343,6 +355,15 @@ def config():
     # pipeline params
     cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
     cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+    # cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
+    # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+    cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
+
+    # kfold
+    cfg.DATASET.FOLD = 1
+    cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
+    cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
+    cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
 
     # add to sacred experiment
     ex.add_config(cfg)
@@ -354,6 +375,7 @@ def config():
 
 if __name__ == '__main__':
     cfg = get_cfg()  # config global variable
+    data_split = json.load(open("seg_3d/data/data_split.json", "r"))
     logger_list = [
         setup_logger(name="fvcore"),
         setup_logger(name=seg_3d.__name__)

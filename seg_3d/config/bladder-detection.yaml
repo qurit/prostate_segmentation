@@ -23,6 +23,7 @@ DATASET:
     - Bladder
     - Tumor
   PARAMS:
+    attend_samples: True
     crop_size:
       - 140
       - 140

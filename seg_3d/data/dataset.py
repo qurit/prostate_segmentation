@@ -155,6 +155,7 @@ class ImageToImage3D(Dataset):
         self.patch_size = patch_size
         self.patch_stride = patch_stride
         self.patch_halo = patch_halo
+        self.attend_samples = kwargs['attend_samples']
         self.logger = logging.getLogger(__name__)
 
         if self.slice_shape is None and len(self.modality) > 1:
@@ -312,6 +313,27 @@ class ImageToImage3D(Dataset):
             patch_im_slice = self.slicer.raw_slices[patch_idx]
             patch_lab_slice = self.slicer.label_slices[patch_idx]
             image, mask = image[patch_im_slice], mask[patch_lab_slice]
+
+        if self.attend_samples:
+            if 'Bladder' in self.class_labels:
+                bladder_index = self.class_labels.index('Bladder')
+                bladder_frames = torch.sum(mask[bladder_index, ...], (1, 2)).numpy()
+                end_frame = np.max(np.nonzero(bladder_frames))
+            else:
+                end_frame = self.num_slices
+            if 'Inter' in self.class_labels:
+                prostate_index = self.class_labels.index('Inter')
+                prostate_frames = torch.sum(mask[prostate_index, ...], (1, 2)).numpy()
+                start_frame = np.min(np.nonzero(prostate_frames))
+            else:
+                start_frame = 0
+            mask = mask[:, start_frame:end_frame, ...]
+            image = image[:, start_frame:end_frame, ...]
+
+        print(mask.shape)
+        print(image.shape)
+        print(self.class_labels)
+        exit()
 
         return {
             "orig_image": orig_image,

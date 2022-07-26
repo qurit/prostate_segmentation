@@ -45,6 +45,7 @@ _C.DATASET.PARAMS.patch_stride = None  # 3 dim tuple for patch stride (how far t
 _C.DATASET.PARAMS.patch_halo = None  # 3 dim tuple for size of halo to be removed from patches
 _C.DATASET.PARAMS.patching_input_size = None  # Tuple describing original image input size before patching
 _C.DATASET.PARAMS.patching_label_size = None  # Tuple describing original labels/mask size before patching
+_C.DATASET.PARAMS.attend_samples = False
 
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 

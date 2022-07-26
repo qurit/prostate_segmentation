@@ -353,7 +353,7 @@ def main(_config, _run):
 @ex.config
 def config():
     # pipeline params
-    cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
+    cfg.CONFIG_FILE = 'seg_3d/config/multi-modality-prostate-detection.yaml'
     cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     # cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
@@ -372,6 +372,7 @@ def config():
     seed = 99  # comment this out to disable deterministic experiments
     tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
     tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
+
 
 if __name__ == '__main__':
     cfg = get_cfg()  # config global variable

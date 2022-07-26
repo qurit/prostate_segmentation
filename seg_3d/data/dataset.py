@@ -330,11 +330,6 @@ class ImageToImage3D(Dataset):
             mask = mask[:, start_frame:end_frame, ...]
             image = image[:, start_frame:end_frame, ...]
 
-        print(mask.shape)
-        print(image.shape)
-        print(self.class_labels)
-        exit()
-
         return {
             "orig_image": orig_image,
             "image": image.float(),

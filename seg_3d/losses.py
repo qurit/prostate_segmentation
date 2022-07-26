@@ -9,8 +9,6 @@ from fvcore.common.registry import Registry
 from torch import nn as nn, einsum
 from torch.autograd import Variable
 
-
-from typing import Iterable, Set, cast
 from seg_3d.utils.misc_utils import expand_as_one_hot
 
 LOSS_REGISTRY = Registry('LOSS')
@@ -73,9 +71,7 @@ class SurfaceLoss:
 
     def __call__(self, probs: torch.Tensor, dist_maps: torch.Tensor) -> torch.Tensor:
 
-        probs = nn.Softmax(dim=1)(probs)
-
-        pc = probs.type(torch.float32)
+        pc = nn.Softmax(dim=1)(probs).type(torch.float32)
         dc = dist_maps.type(torch.float32)
 
         if self.idc:

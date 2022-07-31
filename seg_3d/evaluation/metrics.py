@@ -46,17 +46,35 @@ class MetricList:
 
         for key, value in self.results.items():
             if type(value[0]) == torch.Tensor and value[0].is_cuda:
-                value = np.nanmean(np.asarray([x.detach().cpu().numpy() for x in value]), axis=0).tolist()
+                value = np.asarray([x.detach().cpu().numpy() for x in value])
             else:
-                value = np.nanmean(np.asarray([np.asarray(x) for x in value]), axis=0).tolist()
+                value = np.asarray([np.asarray(x) for x in value])
 
-            if type(value) is list:
-                for i in range(len(value)):
-                    averaged_results[key + '/{}'.format(self.class_labels[i])] = value[i]
+            # find mean
+            value_mean = np.nanmean(value, axis=0).tolist()
+            if type(value_mean) is list:
+                for i in range(len(value_mean)):
+                    averaged_results[key + '/{}'.format(self.class_labels[i])] = value_mean[i]
             else:
-                averaged_results[key] = value
+                averaged_results[key] = value_mean
+
+            # find min
+            if key in ["classwise_dice_score"]:
+                for value_i, label_i in zip(value, self.class_labels):
+                    if label_i in ["Bladder", "Tumor", "Inter"]:
+                        value_i = value_i[~np.isnan(value_i)]
+                        averaged_results[key + '/{}'.format(label_i) + "_min"] = value_i.min().item()
 
         return averaged_results
+
+
+@METRIC_REGISTRY.register()
+def mae_volume(pred, gt):
+    return [
+        abs((pred[:, i, ...].sum() - gt[:, i, ...].sum()) / gt[:, i, ...].sum())
+        for i in range(1, gt.shape[1])
+        # TODO: get proper formula for computing volume
+    ]
 
 
 @METRIC_REGISTRY.register()
@@ -68,7 +86,7 @@ def ssim(pred, gt):
 
 
 @METRIC_REGISTRY.register()
-def hausdorff(pred, gt):
+def hausdorff(pred, gt):  # TODO: this is only for bladder
     orig_shape = pred.shape
     pred = pred.cpu().argmax(axis=1)
     pred[pred != 1] = 0

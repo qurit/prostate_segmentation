@@ -45,6 +45,7 @@ class MetricList:
         averaged_results = {}
 
         for key, value in self.results.items():
+            # 0th dimension are patients and 1st dimension (if it exists) are ROIs
             if type(value[0]) == torch.Tensor and value[0].is_cuda:
                 value = np.asarray([x.detach().cpu().numpy() for x in value])
             else:
@@ -60,10 +61,9 @@ class MetricList:
 
             # find min
             if key in ["classwise_dice_score"]:
-                for value_i, label_i in zip(value, self.class_labels):
-                    if label_i in ["Bladder", "Tumor", "Inter"]:
-                        value_i = value_i[~np.isnan(value_i)]
-                        averaged_results[key + '/{}'.format(label_i) + "_min"] = value_i.min().item()
+                for i in range(len(self.class_labels)):
+                    if self.class_labels[i] in ["Bladder", "Tumor", "Inter"]:
+                        averaged_results[key + '/{}'.format(self.class_labels[i]) + "_min"] = np.nanmin(value[:, i]).item()
 
         return averaged_results
 

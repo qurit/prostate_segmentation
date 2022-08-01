@@ -185,7 +185,7 @@ class MaskVisualizer:
 
             # add title and legend
             axs[a, b].set_title("Ground Truth Mask")
-            axs[a, b].legend(handles=gt_patches, loc="best")  # loc=1 for upper right
+            axs[a, b].legend(handles=gt_patches, loc=1)  # loc=1 for upper right
 
             pred_patches = []  # for legend
             # iterate through each algorithm and its set of predictions
@@ -218,7 +218,7 @@ class MaskVisualizer:
 
                     # make RGBA array for pred
                     pred_im = np.zeros(y_hat.shape + (4,))
-                    if y_hat.sum() != 0:
+                    if y_hat[y_hat > 0.5].sum() != 0:
                         pred_im[:, :, 3] = y_hat
                         pred_im[:, :, :3] = cm.get_cmap(self.pred_cmap_dict[label])(y_hat)[:, :, :3]
 
@@ -243,7 +243,7 @@ class MaskVisualizer:
 
             fig.suptitle("%s Order: %.0f" % (patient, i))
             # add legend for the prediction masks
-            plt.legend(handles=pred_patches, loc="best")
+            plt.legend(handles=pred_patches, loc=1)
             # adjust spacing
             plt.tight_layout()
             plt.subplots_adjust(top=0.90)

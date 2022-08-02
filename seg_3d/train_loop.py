@@ -300,20 +300,20 @@ def main(_config, _run):
     weight_count = sum(np.prod(param.size()) for param in net_params)
     logger.info("Number of model parameters: %.0f" % weight_count)
 
-    if cfg.EVAL_ONLY:
+    if cfg.EVAL_ONLY:  # TODO: EVAL on val vs EVAL on test
         logger.info("Running evaluation only!")
         Checkpointer(model, save_dir=cfg.OUTPUT_DIR).load(cfg.MODEL.WEIGHTS, checkpointables=["model"])
 
         eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
-                                      patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
+                                      patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
                                       joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)
 
         # init eval metrics and evaluator
-        metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
+        metric_list = MetricList(metrics=get_metrics(cfg.TEST.FINAL_EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
         evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
                               metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
 

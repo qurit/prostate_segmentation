@@ -130,7 +130,7 @@ class BCEDiceLoss(nn.Module):
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
-        self.dice = DiceLoss(normalization=normalization).dice
+        self.dice = DiceLoss(normalization=normalization)
         self.class_balanced = class_balanced
 
     def forward(self, input, target):

@@ -16,6 +16,8 @@ from seg_3d.data.itk_image_resample import *
 from seg_3d.utils.slice_builder import SliceBuilder
 from utils import contour2mask, centre_crop
 
+from scipy.ndimage import distance_transform_edt as eucl_distance
+
 
 class JointTransform3D:
     """
@@ -60,14 +62,23 @@ class JointTransform3D:
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
-        # add channel for background
+        # # add channel for background pet & ct
+        # bg_pt = np.ones_like(masks[1])
+        # bg_ct = np.ones_like(masks[0])
+        # for idx, m in enumerate(masks):
+        #     if idx in [1,2,3]:
+        #         bg_pt[bg_pt == m] = 0
+        #     else:
+        #         bg_ct[bg_ct == m] = 1
+        # masks = [bg_pt, bg_ct, *masks]
+
         bg = np.ones_like(masks[0])
         for m in masks:
             bg[bg == m] = 0
         masks = [bg, *masks]
-
+        
         # transforming to tensor
-        image = torch.Tensor(image)
+        image = torch.Tensor(np.array(image))
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
 
         # random crop
@@ -133,7 +144,9 @@ class ImageToImage3D(Dataset):
         # useful inverse mapping which maps roi to modality
         self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
         self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask array
+
         assert len(class_labels) > 0
+
         self.patient_keys = patient_keys  # this can either be a list of strings for keys or list of ints for indices
         self.num_slices = num_slices
         self.slice_shape = slice_shape
@@ -142,6 +155,7 @@ class ImageToImage3D(Dataset):
         self.patch_size = patch_size
         self.patch_stride = patch_stride
         self.patch_halo = patch_halo
+        self.attend_samples = kwargs['attend_samples']
         self.logger = logging.getLogger(__name__)
 
         if self.slice_shape is None and len(self.modality) > 1:
@@ -179,7 +193,7 @@ class ImageToImage3D(Dataset):
 
         self.all_patient_fps = {
             patient: {
-                modality: "data/" + self.dataset_dict[patient][modality]["fp"]
+                modality: './data/' + self.dataset_dict[patient][modality]["fp"]
                 for modality in self.modality
             } for patient in self.patient_keys
         }
@@ -276,16 +290,51 @@ class ImageToImage3D(Dataset):
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
 
+        def one_hot2dist(seg: np.ndarray, resolution: Tuple[float, float, float] = None, dtype=None) -> np.ndarray:
+            K: int = len(seg)
+
+            res = np.zeros_like(seg, dtype=dtype)
+            for k in range(K):
+                posmask = seg[k].astype(np.bool)
+
+                if posmask.any():
+                    negmask = ~posmask
+                    res[k] = eucl_distance(negmask, sampling=resolution) *\
+                             negmask - (eucl_distance(posmask, sampling=resolution) - 1) * posmask
+                # The idea is to leave blank the negative classes
+                # since this is one-hot encoded, another class will supervise that pixel
+
+            return res
+
+        dist_map = one_hot2dist(np.asarray(mask), (1, 1, 1))
+
         if self.patch_wise and self.patch_size is not None:
             patch_idx = idx % len(self.slicer.raw_slices)
             patch_im_slice = self.slicer.raw_slices[patch_idx]
             patch_lab_slice = self.slicer.label_slices[patch_idx]
             image, mask = image[patch_im_slice], mask[patch_lab_slice]
 
+        if self.attend_samples:
+            if 'Bladder' in self.class_labels:
+                bladder_index = self.class_labels.index('Bladder')
+                bladder_frames = torch.sum(mask[bladder_index, ...], (1, 2)).numpy()
+                end_frame = np.max(np.nonzero(bladder_frames))
+            else:
+                end_frame = self.num_slices
+            if 'Inter' in self.class_labels:
+                prostate_index = self.class_labels.index('Inter')
+                prostate_frames = torch.sum(mask[prostate_index, ...], (1, 2)).numpy()
+                start_frame = np.min(np.nonzero(prostate_frames))
+            else:
+                start_frame = 0
+            mask = mask[:, start_frame:end_frame, ...]
+            image = image[:, start_frame:end_frame, ...]
+
         return {
             "orig_image": orig_image,
             "image": image.float(),
             "gt_mask": mask.float(),
+            "dist_map": dist_map,
             "patient": patient
         }
 

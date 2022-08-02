@@ -117,9 +117,11 @@ def train(model):
                         sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.seed))
             ):
 
-                storage.iter = iteration
-                sample = batched_inputs["image"]
+                storage.step()
+                sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
+                data = {'labels': labels,
+                        'dist_map': batched_inputs["dist_map"].to(cfg.MODEL.DEVICE)}
 
                 optimizer.zero_grad()
 
@@ -127,7 +129,7 @@ def train(model):
                 with autocast(enabled=cfg.AMP_ENABLED):
                     # do a forward pass, input is of shape (N, C, D, H, W)
                     preds = model(sample)
-                    training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+                    training_loss = loss(preds, data)  # https://github.com/wolny/pytorch-3dunet#training-tips
 
                     # check if need to process masks and images to be visualized in tensorboard
                     if iteration - start_iter < 5 or (iteration + 1) % 40 == 0:
@@ -351,6 +353,8 @@ def main(_config, _run):
 @ex.config
 def config():
     # pipeline params
+    cfg.CONFIG_FILE = 'seg_3d/config/multi-modality-prostate-detection.yaml'
+    cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     # cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name

@@ -55,7 +55,9 @@ class Evaluator:
                     total=len(self.dataset), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"]  # shape is (batch, channel, depth, height, width)
-                labels = data_input["gt_mask"]
+                labels = data_input["gt_mask"].to(self.device)
+                data = {'labels': labels,
+                        'dist_map': data_input["dist_map"].to(self.device)}
 
                 val_loss = []
 
@@ -96,7 +98,7 @@ class Evaluator:
                         preds = model(sample).detach()
 
                         if self.loss:
-                            L = self.loss(preds, labels.to(self.device))
+                            L = self.loss(preds, data)
                             if type(L) is dict:
                                 L = sum(L.values())
                             self.metric_list.results["val_loss"].append(L)

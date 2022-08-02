@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple
 import torch
 import torch.nn.functional as F
 from fvcore.common.registry import Registry
-from torch import nn as nn
+from torch import nn as nn, einsum
 from torch.autograd import Variable
 
 from seg_3d.utils.misc_utils import expand_as_one_hot
@@ -62,6 +62,27 @@ class DiceLoss(_AbstractDiceLoss):
 
     def dice(self, input, target, weight=None):
         return compute_per_channel_dice(input, target, weight=None)
+
+
+@LOSS_REGISTRY.register()
+class SurfaceLoss:
+    def __init__(self, idc=None):
+        self.idc = idc
+
+    def __call__(self, probs: torch.Tensor, dist_maps: torch.Tensor) -> torch.Tensor:
+
+        pc = nn.Softmax(dim=1)(probs).type(torch.float32)
+        dc = dist_maps.type(torch.float32)
+
+        if self.idc:
+            pc = pc[:, self.idc, ...]
+            dc = dc[:, self.idc, ...]
+
+        multipled = einsum("bkxyz,bkxyz->bkxyz", pc, dc)
+
+        loss = multipled.mean()
+
+        return loss
 
 
 @LOSS_REGISTRY.register()
@@ -201,6 +222,52 @@ class BCEDiceWithOverlapLoss(nn.Module):
 
 
 @LOSS_REGISTRY.register()
+class BoundaryLoss(nn.Module):
+    """Linear combination of BCE and Dice losses"""
+
+    def __init__(self, dice_weight, surface_weight, normalization="sigmoid", surface_idc=None):
+        super(BoundaryLoss, self).__init__()
+        self.surface = SurfaceLoss(surface_idc)
+        self.surface_weight = surface_weight
+        self.dice_weight = dice_weight
+        self.dice = DiceLoss(normalization=normalization)
+
+    def forward(self, input, data):
+        target = data['labels']
+        distms = data['dist_map']
+
+        return self.dice_weight * self.dice(input, target).sum() + self.surface_weight * self.surface(input, distms)
+
+
+@LOSS_REGISTRY.register()
+class BoundaryBCELoss(nn.Module):
+    """Linear combination of BCE and Dice losses"""
+
+    def __init__(self, bce_weight, dice_weight, surface_weight, normalization="sigmoid", class_balanced=False):
+        super(BoundaryBCELoss, self).__init__()
+        self.bce_weight = bce_weight
+        self.bce = nn.BCEWithLogitsLoss()
+        self.surface = SurfaceLoss()
+        self.surface_weight = surface_weight
+        self.dice_weight = dice_weight
+        self.dice = DiceLoss(normalization=normalization)
+        self.class_balanced = class_balanced
+
+    def forward(self, input, data):
+        target = data['labels']
+        distms = data['dist_map']
+
+        if self.class_balanced:
+            num_classes = input.size()[1]
+            weights = [target[:, 0, ...].sum() / target[:, x, ...].sum() for x in range(num_classes)]
+            weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).to(input.device)
+            self.bce = nn.BCEWithLogitsLoss(pos_weight=weights)
+
+        return self.bce_weight * self.bce(input, target) + self.dice_weight * self.dice(input, target).sum() \
+               + self.surface_weight * self.surface(input, distms)
+
+
+@LOSS_REGISTRY.register()
 class BCEDiceSSIMLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
@@ -219,9 +286,9 @@ class BCEDiceSSIMLoss(nn.Module):
 
         if class_weight is not None:
             class_weight = torch.as_tensor(class_weight, dtype=torch.float)
-            if class_weight_loss is "dice":
+            if class_weight_loss == "dice":
                 self.class_weight = class_weight
-            elif class_weight_loss is "bce":
+            elif class_weight_loss == "bce":
                 self.bce = nn.BCEWithLogitsLoss(
                     pos_weight=self.class_weight.view(1, len(class_weight), 1, 1, 1)
                 )

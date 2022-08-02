@@ -45,6 +45,7 @@ _C.DATASET.PARAMS.patch_stride = None  # 3 dim tuple for patch stride (how far t
 _C.DATASET.PARAMS.patch_halo = None  # 3 dim tuple for size of halo to be removed from patches
 _C.DATASET.PARAMS.patching_input_size = None  # Tuple describing original image input size before patching
 _C.DATASET.PARAMS.patching_label_size = None  # Tuple describing original labels/mask size before patching
+_C.DATASET.PARAMS.attend_samples = False
 
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 
@@ -124,4 +125,5 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 _C.NUM_WORKERS = 6  # number of workers for the data loaders
 _C.OUTPUT_DIR = None
 _C.CONFIG_FILE = None
+_C.UNSUPERVISED = False
 _C.AMP_ENABLED = False  # enables automatic mixed precision training

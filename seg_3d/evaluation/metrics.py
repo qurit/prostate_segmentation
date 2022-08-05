@@ -57,7 +57,7 @@ class MetricList:
                 for i in range(len(value_mean)):
                     averaged_results[key + '/{}'.format(self.class_labels[i])] = value_mean[i]
             else:
-                averaged_results[key] = value_mean.item()
+                averaged_results[key] = value_mean
 
             # find min
             if key in ["classwise_dice_score"]:

@@ -13,10 +13,9 @@ from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
 from seg_3d.data.itk_image_resample import *
+from seg_3d.utils.misc_utils import one_hot2dist
 from seg_3d.utils.slice_builder import SliceBuilder
 from utils import contour2mask, centre_crop
-
-from scipy.ndimage import distance_transform_edt as eucl_distance
 
 
 class JointTransform3D:
@@ -61,16 +60,6 @@ class JointTransform3D:
         # apply elastic deformation if specified
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
-
-        # # add channel for background pet & ct
-        # bg_pt = np.ones_like(masks[1])
-        # bg_ct = np.ones_like(masks[0])
-        # for idx, m in enumerate(masks):
-        #     if idx in [1,2,3]:
-        #         bg_pt[bg_pt == m] = 0
-        #     else:
-        #         bg_ct[bg_ct == m] = 1
-        # masks = [bg_pt, bg_ct, *masks]
 
         bg = np.ones_like(masks[0])
         for m in masks:
@@ -155,7 +144,7 @@ class ImageToImage3D(Dataset):
         self.patch_size = patch_size
         self.patch_stride = patch_stride
         self.patch_halo = patch_halo
-        self.attend_samples = kwargs['attend_samples']
+        self.attend_samples = kwargs.get('attend_samples', False)
         self.logger = logging.getLogger(__name__)
 
         if self.slice_shape is None and len(self.modality) > 1:
@@ -174,13 +163,13 @@ class ImageToImage3D(Dataset):
             with open(os.path.join(dp, "global_dict.json")) as file_obj:
                 self.dataset_dict = {**self.dataset_dict, **json.load(file_obj)}
 
-        if patient_keys is None:
+        if self.patient_keys is None:
             # if no patients specified then select all from dataset
             self.patient_keys = list(self.dataset_dict.keys())
-        elif type(patient_keys[0]) is int:
+        elif type(self.patient_keys[0]) is int:
             # if patient keys param is a list of indices get the keys from dataset
             all_patients = list(self.dataset_dict.keys())
-            self.patient_keys = [all_patients[idx] for idx in patient_keys]
+            self.patient_keys = [all_patients[idx] for idx in self.patient_keys]
 
         # sample select patients if num_patients specified
         if num_patients is not None:
@@ -290,22 +279,7 @@ class ImageToImage3D(Dataset):
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
 
-        def one_hot2dist(seg: np.ndarray, resolution: Tuple[float, float, float] = None, dtype=None) -> np.ndarray:
-            K: int = len(seg)
-
-            res = np.zeros_like(seg, dtype=dtype)
-            for k in range(K):
-                posmask = seg[k].astype(np.bool)
-
-                if posmask.any():
-                    negmask = ~posmask
-                    res[k] = eucl_distance(negmask, sampling=resolution) *\
-                             negmask - (eucl_distance(posmask, sampling=resolution) - 1) * posmask
-                # The idea is to leave blank the negative classes
-                # since this is one-hot encoded, another class will supervise that pixel
-
-            return res
-
+        # compute distance map for boundary loss
         dist_map = one_hot2dist(np.asarray(mask), (1, 1, 1))
 
         if self.patch_wise and self.patch_size is not None:
@@ -314,6 +288,7 @@ class ImageToImage3D(Dataset):
             patch_lab_slice = self.slicer.label_slices[patch_idx]
             image, mask = image[patch_im_slice], mask[patch_lab_slice]
 
+        # reduce the search space for finding tumor
         if self.attend_samples:
             if 'Bladder' in self.class_labels:
                 bladder_index = self.class_labels.index('Bladder')

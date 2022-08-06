@@ -232,7 +232,7 @@ def train(model):
                 # configure mask visualizer if specified
                 if cfg.TEST.VIS_PREDS:
                     evaluator.set_mask_visualizer(
-                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")  # skip label for bgd
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")  # skip label for bgd
                     )
 
                 # run evaluation
@@ -316,8 +316,8 @@ def main(_config, _run):
         eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
-                                      num_patients=cfg.DATASET.TEST_NUM_PATIENTS,
-                                      patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
+                                      num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
+                                      patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
                                       joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)
@@ -330,7 +330,7 @@ def main(_config, _run):
         # configure mask visualizer if specified
         if cfg.TEST.VIS_PREDS:
             evaluator.set_mask_visualizer(
-                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")
             )
 
         results = evaluator.evaluate(model)
@@ -376,6 +376,9 @@ def config():
     cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
 
     ## ADD MORE CONFIG CHANGES HERE ##
+    cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk
+    cfg.TEST.VIS_PREDS = True  # this runs the mask visualizer code at the end of training
+    # cfg.DATASET.TEST_PATIENT_KEYS = ['JGH01', 'JGH02', 'JGH03', 'JGH04', 'JGH05']
 
     # add to sacred experiment
     ex.add_config(cfg)

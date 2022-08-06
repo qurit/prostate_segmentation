@@ -114,3 +114,4 @@ TRANSFORMS:
   div_by_max: true
   multi_scale: null
   p_flip: 0.5
+# from /data/home/rodrigue/prostate-segmentation/seg_3d/output/multi-mod-3-new-data-split/1/config.yaml

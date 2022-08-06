@@ -98,7 +98,7 @@ class Evaluator:
                         preds = model(sample).detach()
 
                         if self.loss:
-                            L = self.loss(preds, data)
+                            L = self.loss(preds, data)   # TODO: pass dist map into kwargs 
                             if type(L) is dict:
                                 L = sum(L.values())
                             self.metric_list.results["val_loss"].append(L)

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Callable, List, Tuple
 
 import torch
@@ -98,7 +99,7 @@ class Evaluator:
                         preds = model(sample).detach()
 
                         if self.loss:
-                            L = self.loss(preds, data)
+                            L = self.loss(preds, data)   # TODO: pass dist map into kwargs 
                             if type(L) is dict:
                                 L = sum(L.values())
                             self.metric_list.results["val_loss"].append(L)
@@ -137,9 +138,12 @@ class Evaluator:
 
                     # plot mask predictions if specified
                     if self.mask_visualizer:
-                        self.mask_visualizer.plot_mask_predictions(
-                            patient, image.squeeze(0), preds.squeeze(0), labels.squeeze(0), skip_bkg=True
-                        )
+                        for plane in ['tran', 'cor', 'sag']:
+                            self.mask_visualizer.root_plot_dir = os.path.join(os.path.dirname(self.mask_visualizer.root_plot_dir), plane)
+                            self.mask_visualizer.plot_mask_predictions(
+                                patient, image.squeeze(0), preds.squeeze(0), labels.squeeze(0),
+                                skip_bkg=True, gt_overlay=False, plane=plane
+                            )
 
         model.train()
         averaged_results = (self.metric_list.get_results(average=True))

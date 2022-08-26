@@ -118,6 +118,10 @@ def train(model):
             ):
 
                 storage.step()
+
+                # extract data from item recieved from data loader
+                patients = batched_inputs["patient"]
+                orig_imgs = batched_inputs["orig_image"]
                 sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
                 data = {'labels': labels,
@@ -132,14 +136,17 @@ def train(model):
                     training_loss = loss(preds, data)  # https://github.com/wolny/pytorch-3dunet#training-tips
 
                     # check if need to process masks and images to be visualized in tensorboard
-                    if iteration - start_iter < 5 or (iteration + 1) % 40 == 0:
-                        for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
-                                               [batched_inputs["orig_image"], sample, labels, preds]):
-                            tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
+                    for idx, p in enumerate(patients):
+                        if p in train_dataset.patient_keys[:4]:
+                            for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
+                                                   [orig_imgs, sample, labels, preds]):
+                                tags_imgs = tensorboard_img_formatter(name=p + "/" + name,
+                                                                      batch=batch[idx].unsqueeze(0).detach().cpu(),
+                                                                      slices=(30, 40, 70, 80))
 
-                            # add each tag image tuple to tensorboard
-                            for item in tags_imgs:
-                                storage.put_image(*item)
+                                # add each tag image tuple to tensorboard
+                                for item in tags_imgs:
+                                    storage.put_image(*item)
 
                 # loss can either return a dict of losses or just a single tensor
                 loss_dict = {}
@@ -225,7 +232,7 @@ def train(model):
                 # configure mask visualizer if specified
                 if cfg.TEST.VIS_PREDS:
                     evaluator.set_mask_visualizer(
-                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")  # skip label for bgd
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")  # skip label for bgd
                     )
 
                 # run evaluation
@@ -273,7 +280,7 @@ def main(_config, _run):
 
     cfg.freeze()  # freeze all parameters i.e. no more changes can be made to config
     # make sure latest version of config is saved to mongo db
-    if ex.observers != 0:
+    if ex.observers != 0 and ex.observers[0].run_entry is not None:
         ex.observers[0].run_entry["config"] = cfg
 
     # save logs to output directory
@@ -309,20 +316,21 @@ def main(_config, _run):
         eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
-                                      patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
+                                      num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
+                                      patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
                                       joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)
 
         # init eval metrics and evaluator
-        metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
+        metric_list = MetricList(metrics=get_metrics(cfg.TEST.FINAL_EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
         evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
                               metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
 
         # configure mask visualizer if specified
         if cfg.TEST.VIS_PREDS:
             evaluator.set_mask_visualizer(
-                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")
             )
 
         results = evaluator.evaluate(model)
@@ -330,8 +338,9 @@ def main(_config, _run):
             # add to sacred experiment
             ex.log_scalar(k, float(v), step=0)
         # save inference results
-        with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
-            pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
+        if cfg.TEST.INFERENCE_FILE_NAME:
+            with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
+                pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
         return
 
     elif cfg.PRED_ONLY:  # TODO
@@ -359,11 +368,19 @@ def config():
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 
+    # useful for debugging loss
+    # cfg.LOSS.PARAMS.class_labels = cfg.DATASET.CLASS_LABELS
+
     # kfold
     cfg.DATASET.FOLD = 1
     cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
     cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
     cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
+
+    ## ADD MORE CONFIG CHANGES HERE ##
+    cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk
+    cfg.TEST.VIS_PREDS = True  # this runs the mask visualizer code at the end of training
+    # cfg.DATASET.TEST_PATIENT_KEYS = ['JGH01', 'JGH02', 'JGH03', 'JGH04', 'JGH05']
 
     # add to sacred experiment
     ex.add_config(cfg)

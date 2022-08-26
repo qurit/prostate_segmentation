@@ -125,5 +125,4 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 _C.NUM_WORKERS = 6  # number of workers for the data loaders
 _C.OUTPUT_DIR = None
 _C.CONFIG_FILE = None
-_C.UNSUPERVISED = False
-_C.AMP_ENABLED = False  # enables automatic mixed precision training
+_C.AMP_ENABLED = True  # enables automatic mixed precision training

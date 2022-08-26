@@ -1,12 +1,13 @@
 import os
 import random
-from typing import Optional
-from zipfile import ZipFile
+from typing import Optional, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Sampler
+
+from scipy.ndimage import distance_transform_edt as eucl_distance
 
 
 def seed_all(seed):
@@ -73,6 +74,27 @@ def expand_as_one_hot(input, C, ignore_index=None):
         return torch.zeros(shape).to(input.device).scatter_(1, input, 1)
 
 
+def one_hot2dist(seg: np.ndarray, resolution: Tuple[float, float, float] = None, dtype=None) -> np.ndarray:
+    """
+    original code from
+    https://github.com/LIVIAETS/boundary-loss/blob/8f4457416a583e33cae71443779591173e27ec62/utils.py#L260
+    """
+    K: int = len(seg)
+
+    res = np.zeros_like(seg, dtype=dtype)
+    for k in range(K):
+        posmask = seg[k].astype(np.bool)
+
+        if posmask.any():
+            negmask = ~posmask
+            res[k] = eucl_distance(negmask, sampling=resolution) *\
+                        negmask - (eucl_distance(posmask, sampling=resolution) - 1) * posmask
+        # The idea is to leave blank the negative classes
+        # since this is one-hot encoded, another class will supervise that pixel
+
+    return res
+
+
 class TrainingSampler(Sampler):
     """
     original code from
@@ -102,25 +124,3 @@ class TrainingSampler(Sampler):
                 yield from torch.randperm(self._size, generator=g).tolist()
             else:
                 yield from torch.arange(self._size).tolist()
-
-
-def zip_files_in_dir(dir_name, zip_file_name, to_ignore=None):
-    # original code from
-    # https://thispointer.com/python-how-to-create-a-zip-archive-from-multiple-files-or-directory/
-    if to_ignore is None:
-        to_ignore = ["__pycache__", "output"]  # by default ignore these directories
-    filter_fn = lambda name: all(
-        item not in name for item in to_ignore
-    )
-
-    with ZipFile(zip_file_name, 'w') as zip_obj:
-        # Iterate over all the files in directory
-        for folder_name, subfolders, filenames in os.walk(dir_name):
-            if filter_fn(folder_name):
-                for filename in filenames:
-                    if filter_fn(filename):
-                        # create complete filepath of file in directory
-                        filePath = os.path.join(folder_name, filename)
-                        # Add file to zip
-                        zip_obj.write(filePath, filePath)
-

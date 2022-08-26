@@ -65,13 +65,19 @@ class DiceLoss(_AbstractDiceLoss):
 
 
 @LOSS_REGISTRY.register()
-class SurfaceLoss:
+class SurfaceLoss(nn.Module):
+    """
+    Original code from
+    https://github.com/LIVIAETS/boundary-loss/blob/8f4457416a583e33cae71443779591173e27ec62/losses.py#L76
+    """
     def __init__(self, idc=None):
+        super(SurfaceLoss, self).__init__()
+        # Self.idc is used to filter out some classes of the target mask. Use fancy indexing
         self.idc = idc
 
-    def __call__(self, probs: torch.Tensor, dist_maps: torch.Tensor) -> torch.Tensor:
+    def forward(self, logits: torch.Tensor, dist_maps: torch.Tensor) -> torch.Tensor:
 
-        pc = nn.Softmax(dim=1)(probs).type(torch.float32)
+        pc = nn.Softmax(dim=1)(logits).type(torch.float32)
         dc = dist_maps.type(torch.float32)
 
         if self.idc:
@@ -227,25 +233,41 @@ class BCEDiceWithOverlapLoss(nn.Module):
 
 @LOSS_REGISTRY.register()
 class BoundaryLoss(nn.Module):
-    """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, dice_weight, surface_weight, normalization="sigmoid", surface_idc=None):
+    def __init__(self, dice_weight, surface_weight, normalization="softmax", surface_idc=None, class_labels=None):
         super(BoundaryLoss, self).__init__()
         self.surface = SurfaceLoss(surface_idc)
         self.surface_weight = surface_weight
         self.dice_weight = dice_weight
         self.dice = DiceLoss(normalization=normalization)
+        self.class_labels = class_labels
+        self.logger = logging.getLogger(__name__)
 
     def forward(self, input, data):
         target = data['labels']
         distms = data['dist_map']
 
-        return self.dice_weight * self.dice(input, target).sum() + self.surface_weight * self.surface(input, distms)
+        # dice
+        dice_loss = self.dice(input, target)
+        # get raw dice scores
+        dice_verbose = 1 - dice_loss.detach().cpu().numpy()
+
+        if self.class_labels is not None:
+            dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
+            dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
+        else:
+            dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
+
+        self.logger.info(("Dice: " + "{}" * input.shape[1]).format(*dice_log))
+
+        return {
+            "dice": self.dice_weight * dice_loss.sum(),
+            "boundary": self.surface_weight * self.surface(input, distms)
+        }
 
 
 @LOSS_REGISTRY.register()
 class BoundaryBCELoss(nn.Module):
-    """Linear combination of BCE and Dice losses"""
 
     def __init__(self, bce_weight, dice_weight, surface_weight, normalization="sigmoid", class_balanced=False):
         super(BoundaryBCELoss, self).__init__()
@@ -273,7 +295,6 @@ class BoundaryBCELoss(nn.Module):
 
 @LOSS_REGISTRY.register()
 class BCEDiceSSIMLoss(nn.Module):
-    """Linear combination of BCE and Dice losses"""
 
     def __init__(self, bce_weight, dice_weight, ssim_weight, class_weight=None, class_weight_loss="both",
                  normalization="sigmoid", class_labels=None):

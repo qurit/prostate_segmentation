@@ -12,7 +12,7 @@ class _TensorboardFormatter:
     def __init__(self, **kwargs):
         pass
 
-    def __call__(self, name, batch):
+    def __call__(self, name, batch, slices=None):
         """
         Transform a batch to a series of tuples of the form (tag, img), where `tag` corresponds to the image tag
         and `img` is the image itself.
@@ -35,11 +35,11 @@ class _TensorboardFormatter:
 
             return tag, img
 
-        tagged_images = self.process_batch(name, batch)
+        tagged_images = self.process_batch(name, batch, slices)
 
         return list(map(_check_img, tagged_images))
 
-    def process_batch(self, name, batch):
+    def process_batch(self, name, batch, slices):
         raise NotImplementedError
 
 
@@ -48,29 +48,34 @@ class DefaultTensorboardFormatter(_TensorboardFormatter):
         super().__init__(**kwargs)
         self.skip_last_target = skip_last_target
 
-    def process_batch(self, name, batch):
+    def process_batch(self, name, batch, slices=None):
         if name == 'targets' and self.skip_last_target:
             batch = batch[:, :-1, ...]
 
-        tag_template = '{}/batch_{}/channel_{}/slice_{}'  # TODO: improve naming
+        if slices is None:
+            slices = [batch.shape[-3] // 2]  # get the middle slice
+        elif isinstance(slices, int):
+            slices = [slices]
+
+        tag_template = '{}/batch_{}/channel_{}/slice_{}'
 
         tagged_images = []
 
         if batch.ndim == 5:
             # NCDHW
-            slice_idx = batch.shape[2] // 2  # get the middle slice
             for batch_idx in range(batch.shape[0]):
                 for channel_idx in range(batch.shape[1]):
-                    tag = tag_template.format(name, batch_idx, channel_idx, slice_idx)
-                    img = batch[batch_idx, channel_idx, slice_idx, ...]
-                    tagged_images.append((tag, self._normalize_img(img)))
+                    for slice_idx in slices:
+                        tag = tag_template.format(name, batch_idx, channel_idx, slice_idx)
+                        img = batch[batch_idx, channel_idx, slice_idx, ...]
+                        tagged_images.append((tag, self._normalize_img(img)))
         else:
             # batch has no channel dim: NDHW
-            slice_idx = batch.shape[1] // 2  # get the middle slice
             for batch_idx in range(batch.shape[0]):
-                tag = tag_template.format(name, batch_idx, 0, slice_idx)
-                img = batch[batch_idx, slice_idx, ...]
-                tagged_images.append((tag, self._normalize_img(img)))
+                for slice_idx in slices:
+                    tag = tag_template.format(name, batch_idx, 0, slice_idx)
+                    img = batch[batch_idx, slice_idx, ...]
+                    tagged_images.append((tag, self._normalize_img(img)))
 
         return tagged_images
 

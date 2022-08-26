@@ -130,16 +130,19 @@ class BCEDiceLoss(nn.Module):
         self.bce_weight = bce_weight
         self.bce = nn.BCEWithLogitsLoss()
         self.dice_weight = dice_weight
-        self.dice = DiceLoss(normalization=normalization).dice
+        self.dice = DiceLoss(normalization=normalization)#.dice
         self.class_balanced = class_balanced
 
     def forward(self, input, target):
+        target = target['labels']
+
         if self.class_balanced:
+            epsilon = 1e-10
             num_classes = input.size()[1]
-            weights = [target[:, 0, ...].sum() / target[:, x, ...].sum() for x in range(num_classes)]
+            weights = [target[:, 0, ...].sum() / (target[:, x, ...].sum() + epsilon) for x in range(num_classes)]
             weights = torch.FloatTensor(weights).reshape((1, num_classes, 1, 1, 1)).to(input.device)
             self.bce = nn.BCEWithLogitsLoss(pos_weight=weights)
-
+        
         return self.bce_weight * self.bce(input, target) + self.dice_weight * self.dice(input, target).sum()
 
 
@@ -190,6 +193,7 @@ class BCEDiceWithOverlapLoss(nn.Module):
         return torch.tensor(0.)
 
     def forward(self, input, target) -> Dict[str, torch.Tensor]:
+        target = target['labels']
         # dice
         dice_loss = self.dice(input, target[:, :input.shape[1]])
         # get raw dice scores

@@ -353,7 +353,7 @@ def main(_config, _run):
 @ex.config
 def config():
     # pipeline params
-    cfg.CONFIG_FILE = 'seg_3d/config/multi-modality-prostate-detection.yaml'
+    cfg.CONFIG_FILE = 'seg_3d/config/mm4-nds-attend-samples-fmaps64-onlytumor.yaml'
     cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     # cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!

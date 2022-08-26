@@ -110,16 +110,12 @@ EARLY_STOPPING:
   PATIENCE: 10
 EVAL_ONLY: false
 LOSS:
-  FN: BCEDiceWithOverlapLoss
+  FN: BCEDiceLoss
   PARAMS:
-    bce_weight: 1.
     dice_weight: 1.
-    overlap_weight: 0.0
-    overlap_idx: null  # tuple containing channel indices of pred, gt for overlap computation
-    #                      # (pred bladder channel, gt tumor channel)
-    class_weight: [0, 1, 1, 10, 1, 1, 1]  # set weight for background to 0
-    class_weight_loss: both
+    bce_weight: 1.
     normalization: sigmoid
+    class_balanced: True
 MODEL:
   BACKBONE:
     NAME: UNet3D

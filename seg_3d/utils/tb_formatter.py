@@ -53,7 +53,9 @@ class DefaultTensorboardFormatter(_TensorboardFormatter):
             batch = batch[:, :-1, ...]
 
         if slices is None:
-            slices = [batch.shape[-3] // 2]  # get the middle slice
+            step_size = int(batch.shape[2] / 4)
+            slices = list(range(batch.shape[2]))[::step_size]
+            # slices = [batch.shape[-3] // 2]  # get the middle slice
         elif isinstance(slices, int):
             slices = [slices]
 

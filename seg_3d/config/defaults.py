@@ -46,6 +46,7 @@ _C.DATASET.PARAMS.patch_halo = None  # 3 dim tuple for size of halo to be remove
 _C.DATASET.PARAMS.patching_input_size = None  # Tuple describing original image input size before patching
 _C.DATASET.PARAMS.patching_label_size = None  # Tuple describing original labels/mask size before patching
 _C.DATASET.PARAMS.attend_samples = False
+_C.DATASET.PARAMS.attend_frame_dict_path = ("seg_3d/data/attend_frame_range.npy")
 
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 

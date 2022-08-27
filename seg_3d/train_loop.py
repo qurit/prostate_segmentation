@@ -141,8 +141,7 @@ def train(model):
                             for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
                                                    [orig_imgs, sample, labels, preds]):
                                 tags_imgs = tensorboard_img_formatter(name=p + "/" + name,
-                                                                      batch=batch[idx].unsqueeze(0).detach().cpu(),
-                                                                      slices=(30, 40, 70, 80))
+                                                                      batch=batch[idx].unsqueeze(0).detach().cpu())
 
                                 # add each tag image tuple to tensorboard
                                 for item in tags_imgs:

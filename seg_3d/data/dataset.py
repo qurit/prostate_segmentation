@@ -145,6 +145,7 @@ class ImageToImage3D(Dataset):
         self.patch_stride = patch_stride
         self.patch_halo = patch_halo
         self.attend_samples = kwargs.get('attend_samples', False)
+        self.frame_dict_path = kwargs.get('attend_frame_dict_path', None)
         self.logger = logging.getLogger(__name__)
 
         if self.slice_shape is None and len(self.modality) > 1:
@@ -290,21 +291,12 @@ class ImageToImage3D(Dataset):
 
         # reduce the search space for finding tumor
         if self.attend_samples:
-            if 'Bladder' in self.class_labels:
-                bladder_index = self.class_labels.index('Bladder')
-                bladder_frames = torch.sum(mask[bladder_index, ...], (1, 2)).numpy()
-                end_frame = np.max(np.nonzero(bladder_frames))
-            else:
-                end_frame = self.num_slices
-            if 'Inter' in self.class_labels:
-                prostate_index = self.class_labels.index('Inter')
-                prostate_frames = torch.sum(mask[prostate_index, ...], (1, 2)).numpy()
-                start_frame = np.min(np.nonzero(prostate_frames))
-            else:
-                start_frame = 0
+            assert os.path.exists('seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
+            frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
+            (start_frame, end_frame) = frame_dict[patient]
             mask = mask[:, start_frame:end_frame, ...]
             image = image[:, start_frame:end_frame, ...]
-
+            dist_map = dist_map[:, start_frame:end_frame, ...]
         return {
             "orig_image": orig_image,
             "image": image.float(),

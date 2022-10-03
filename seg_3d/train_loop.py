@@ -261,7 +261,7 @@ def main(_config, _run):
         base_dir = os.path.join(base_dir, str(cfg.DATASET.FOLD))
         cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
         cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
-        # cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
+        cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
 
     if any([cfg.EVAL_ONLY, cfg.PRED_ONLY, cfg.RESUME]) and not cfg.MODEL.WEIGHTS:
         # get model weight file if not specified
@@ -366,8 +366,6 @@ def config():
     # pipeline params
     cfg.CONFIG_FILE = 'seg_3d/config/mm4-nds-attend-samples-fmaps64-onlytumor.yaml'
     cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
-    # cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
-    # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 
     # useful for debugging loss
@@ -375,15 +373,13 @@ def config():
 
     # kfold
     cfg.DATASET.FOLD = 1
-    cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
-    cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
-    cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
 
     ## ADD MORE CONFIG CHANGES HERE ##
     cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk
     cfg.TEST.VIS_PREDS = True  # this runs the mask visualizer code at the end of training
     # cfg.DATASET.TEST_PATIENT_KEYS = ['JGH01', 'JGH02', 'JGH03', 'JGH04', 'JGH05']
 
+    ############################################
     # add to sacred experiment
     ex.add_config(cfg)
 

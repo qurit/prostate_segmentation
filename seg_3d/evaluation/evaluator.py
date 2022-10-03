@@ -159,8 +159,6 @@ class Evaluator:
         }
 
     def threshold_predictions(self, preds: torch.Tensor) -> torch.Tensor:
-        # below approach only translates well to binary tasks
-        # TODO: improve for multi class case, maybe just argmax?
         new_preds = [
             torch.where(pred >= thres, torch.ones_like(pred), torch.zeros_like(pred))
             for thres, pred in zip(self.thresholds, preds)

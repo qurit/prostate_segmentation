@@ -143,26 +143,25 @@ class GeneralizedDiceLoss(_AbstractDiceLoss):
 class BCEDiceLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
-    def __init__(self, bce_weight, dice_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False):
+    def __init__(self, bce_weight, dice_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False, gdl=False):
         super(BCEDiceLoss, self).__init__()
-        
+        self.device = "cpu" if not torch.cuda.is_available() else "cuda"
         self.class_weight = None if not class_weight else torch.as_tensor(class_weight, dtype=torch.float)
         
         self.dice_weight = dice_weight
         self.normalization = normalization
-        self.dice = DiceLoss(normalization=normalization, weight=self.class_weight)
+        self.gdl = gdl
+        self.dice = DiceLoss(normalization=normalization) if not self.gdl else GeneralizedDiceLoss(normalization=normalization)
 
-        self.device = "cpu" if not torch.cuda.is_available() else "cuda"
-        self.bce_class_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1).to(self.device)
-        
-        self.bce = nn.BCEWithLogitsLoss(pos_weight=self.bce_class_weight)
         self.bce_weight = bce_weight
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=self.class_weight.view(1, -1, 1, 1, 1).to(self.device))
         
         self.class_labels = class_labels
         self.logger = logging.getLogger(__name__)
 
-        self.class_balanced = class_balanced
+        self.class_balanced = class_balanced if not self.gdl else None
     
+    @staticmethod
     def get_class_balanced_weights(target):
         epsilon = 1e-10
         num_classes = target.size()[1]
@@ -170,24 +169,25 @@ class BCEDiceLoss(nn.Module):
         return torch.as_tensor(weights, dtype=torch.float)
 
     def forward(self, input, target):
-        
         target = target['labels']
+    
+        if self.class_balanced:     
+            self.class_weight = self.get_class_balanced_weights(target)
+            self.bce.pos_weight = self.class_weight.view(1, -1, 1, 1, 1).to(self.device)
 
         dice_loss = self.dice(input, target)
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
+        dice_loss *= self.class_weight.to(self.device) if not self.gdl else 1 # apply per channel weighting to dice
 
-        if self.class_labels is not None:
-            dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
-            dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
-        else:
-            dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
+        # print the individual dice scores
+        if dice_loss.shape:
+            if self.class_labels is not None:
+                dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
+                dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
+            else:
+                dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
 
-        self.logger.info(("Dice: " + "{}" * len(dice_log)).format(*dice_log))
-
-        if self.class_balanced:
-            weights = self.get_class_balanced_weights(target)
-            self.dice = DiceLoss(normalization=self.normalization, weight=weights)
-            self.bce = nn.BCEWithLogitsLoss(pos_weight=weights.view(1, -1, 1, 1, 1).to(self.device))
+            self.logger.info(("Dice: " + "{}" * len(dice_log)).format(*dice_log))
         
         return {
             "dice": self.dice_weight * dice_loss.sum(),
@@ -233,10 +233,10 @@ class BCEDiceOverlapLoss(BCEDiceLoss):
 
 
 @LOSS_REGISTRY.register()
-class BoundaryLoss(nn.Module):
-    def __init__(self, dice_weight, surface_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False):
-        super(BoundaryLoss, self).__init__()
-        
+class BoundaryBCEDiceLoss(nn.Module):
+    def __init__(self, bce_weight, dice_weight, surface_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False, gdl=False):
+        super(BoundaryBCEDiceLoss, self).__init__()
+        self.device = "cpu" if not torch.cuda.is_available() else "cuda"
         self.class_weight = None if not class_weight else torch.as_tensor(class_weight, dtype=torch.float)
 
         self.surface = SurfaceLoss(self.class_weight)
@@ -244,13 +244,19 @@ class BoundaryLoss(nn.Module):
         
         self.dice_weight = dice_weight
         self.normalization = normalization
-        self.dice = DiceLoss(normalization=normalization, weight=self.class_weight)
+        self.gdl = gdl
+        self.dice = DiceLoss(normalization=normalization) if not self.gdl else GeneralizedDiceLoss(normalization=normalization)
+
+        self.bce_class_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1).to(self.device)
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=self.bce_class_weight)
+        self.bce_weight = bce_weight
         
         self.class_labels = class_labels
         self.logger = logging.getLogger(__name__)
 
-        self.class_balanced = class_balanced
-    
+        self.class_balanced = class_balanced if not self.gdl else None
+        
+    @staticmethod
     def get_class_balanced_weights(target):
         epsilon = 1e-10
         num_classes = target.size()[1]
@@ -260,55 +266,30 @@ class BoundaryLoss(nn.Module):
     def forward(self, input, data):
         target = data['labels']
         distms = data['dist_map']
+    
+        if self.class_balanced:     
+            self.class_weight = self.get_class_balanced_weights(target)
+            self.bce.pos_weight = self.class_weight.view(1, -1, 1, 1, 1).to(self.device)
 
         dice_loss = self.dice(input, target)
         dice_verbose = 1 - dice_loss.detach().cpu().numpy()
+        dice_loss *= self.class_weight.to(self.device) if not self.gdl else 1 # apply per channel weighting to dice
 
-        if self.class_labels is not None:
-            dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
-            dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
-        else:
-            dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
+        # print the individual dice scores
+        if dice_loss.shape:
+            if self.class_labels is not None:
+                dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
+                dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
+            else:
+                dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
 
-        self.logger.info(("Dice: " + "{}" * len(dice_log)).format(*dice_log))
-
-        if self.class_balanced:
-            weights = self.get_class_balanced_weights(target)
-            self.surface = SurfaceLoss(class_weights=weights)
-            self.dice = DiceLoss(normalization=self.normalization, weight=weights)
+            self.logger.info(("Dice: " + "{}" * len(dice_log)).format(*dice_log))
 
         return {
             "dice": self.dice_weight * dice_loss.sum(),
+            "bce": self.bce_weight * self.bce(input, target),
             "boundary": self.surface_weight * self.surface(input, distms)
         }
-
-
-@LOSS_REGISTRY.register()
-class BoundaryBCELoss(BoundaryLoss):
-
-    def __init__(self, bce_weight, dice_weight, surface_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False):
-        
-        super().__init__(dice_weight, surface_weight, normalization=normalization, class_labels=class_labels, 
-            class_weight=class_weight, class_balanced=class_balanced)
-        
-        self.device = "cpu" if not torch.cuda.is_available() else "cuda"
-        self.bce_class_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1).to(self.device)
-        
-        self.bce = nn.BCEWithLogitsLoss(pos_weight=self.bce_class_weight)
-        self.bce_weight = bce_weight
-
-    def forward(self, input, data):
-        target = data['labels']
-
-        loss_dict = super().forward(input, data)
-
-        if self.class_balanced:
-            weights = self.get_class_balanced_weights(target).view(1, -1, 1, 1, 1).to(self.device)
-            self.bce = nn.BCEWithLogitsLoss(pos_weight=weights)
-
-        loss_dict['bce'] = self.bce_weight * self.bce(input, target)
-
-        return loss_dict
 
 
 @LOSS_REGISTRY.register()

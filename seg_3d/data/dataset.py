@@ -291,7 +291,7 @@ class ImageToImage3D(Dataset):
 
         # reduce the search space for finding tumor
         if self.attend_samples:
-            assert os.path.exists('seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
+            assert os.path.exists(self.frame_dict_path), 'FRAME DICT PATH DOES NOT EXIST!!'
             frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
             (start_frame, end_frame) = frame_dict[patient]
             mask = mask[:, start_frame:end_frame, ...]

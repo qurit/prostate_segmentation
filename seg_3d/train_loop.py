@@ -259,6 +259,9 @@ def main(_config, _run):
 
     if cfg.DATASET.FOLD is not None:
         base_dir = os.path.join(base_dir, str(cfg.DATASET.FOLD))
+        cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
+        cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
+        # cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
 
     if any([cfg.EVAL_ONLY, cfg.PRED_ONLY, cfg.RESUME]) and not cfg.MODEL.WEIGHTS:
         # get model weight file if not specified

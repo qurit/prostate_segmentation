@@ -219,6 +219,7 @@ def train(model):
 
             if cfg.TEST.FINAL_EVAL_METRICS and model_checkpoint in checkpointer.get_all_checkpoint_files():
                 logger.info("Running final evaluation with best model...")
+                evaluator.thresholds = cfg.TEST.THRESHOLDS
 
                 # add weight file to db
                 ex.add_artifact(os.path.join(cfg.OUTPUT_DIR, "model_best.pth"), content_type="weights")
@@ -251,11 +252,15 @@ def train(model):
 @ex.main
 def main(_config, _run):
     cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line
+    name = _run.experiment_info["name"]
+    base_dir = os.path.join("seg_3d/output", name)
+
+    # next two lines are for when config file is specified in cmdline
+    # cfg.merge_from_file(CN(_config).CONFIG_FILE)
+    # base_dir, cfg.OUTPUT_DIR = cfg.OUTPUT_DIR, None
 
     # make training deterministic
     seed_all(cfg.seed)
-    name = _run.experiment_info["name"]
-    base_dir = os.path.join("seg_3d/output", name)
 
     if cfg.DATASET.FOLD is not None:
         base_dir = os.path.join(base_dir, str(cfg.DATASET.FOLD))
@@ -364,12 +369,9 @@ def main(_config, _run):
 @ex.config
 def config():
     # pipeline params
-    cfg.CONFIG_FILE = 'seg_3d/config/mm4-nds-attend-samples-fmaps64-onlytumor.yaml'
-    cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+    # cfg.CONFIG_FILE = 'seg_3d/config/mm4-nds-attend-samples-fmaps64-onlytumor.yaml'
+    # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
-
-    # useful for debugging loss
-    # cfg.LOSS.PARAMS.class_labels = cfg.DATASET.CLASS_LABELS
 
     # kfold
     cfg.DATASET.FOLD = 1

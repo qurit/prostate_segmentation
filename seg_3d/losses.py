@@ -168,8 +168,8 @@ class BCEDiceLoss(nn.Module):
         weights = [target[:, 0, ...].sum() / (target[:, x, ...].sum() + epsilon) for x in range(num_classes)]
         return torch.as_tensor(weights, dtype=torch.float)
 
-    def forward(self, input, target):
-        target = target['labels']
+    def forward(self, input, data):
+        target = data['labels']
     
         if self.class_balanced:     
             self.class_weight = self.get_class_balanced_weights(target)
@@ -200,9 +200,8 @@ class BCEDiceOverlapLoss(BCEDiceLoss):
     """Linear combination of BCE and Dice losses"""
 
     def __init__(self, bce_weight, dice_weight, overlap_weight, overlap_idx=(1, 2), normalization="softmax",
-         class_labels=None, class_weight=None, class_balanced=False):
-        
-        super().__init__(bce_weight, dice_weight, normalization=normalization, class_labels=class_labels, class_weight=class_weight, class_balanced=class_balanced)
+                 class_labels=None, class_weight=None, class_balanced=False, gdl=False):
+        super().__init__(bce_weight, dice_weight, normalization=normalization, class_labels=class_labels, class_weight=class_weight, class_balanced=class_balanced, gdl=gdl)
 
         self.overlap_weight = overlap_weight
         self.overlap_idx = overlap_idx  # tuple containing the channel indices of pred, gt for overlap computation
@@ -221,8 +220,10 @@ class BCEDiceOverlapLoss(BCEDiceLoss):
 
     def forward(self, input, data) -> Dict[str, torch.Tensor]:
         target = data['labels']
-
-        loss_dict = super().forward(input, data)
+        if input.shape[1] < target.shape[1]:
+            loss_dict = super().forward(input, {'labels': target[:, :input.shape[1], ...]})
+        else:
+            loss_dict = super().forward(input, data)
 
         # don't compute overlap if overlap_idx is set to None
         overlap_loss = self.overlap(*self.overlap_idx, input, target) if self.overlap_idx else torch.tensor(0.)

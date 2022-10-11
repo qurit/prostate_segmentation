@@ -110,6 +110,7 @@ def classwise_dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def argmax_dice_score(pred, gt):
+    # argmax after thresholding predictions does not make sense!
     pred = pred.cpu().numpy().argmax(axis=1)
     gt = gt.cpu().numpy()
 
@@ -139,8 +140,8 @@ def argmax_dice_score(pred, gt):
 @METRIC_REGISTRY.register()
 def overlap(pred, gt):
     # check if there are at least 3 channels
-    if pred.shape[1] < 3:
-        return np.NaN
+    if gt.shape[1] < 3:
+       return np.NaN
 
     pred = pred.cpu().numpy().argmax(axis=1)
     gt = gt.cpu().numpy()
@@ -148,6 +149,14 @@ def overlap(pred, gt):
     pred[pred != 1] = 0
 
     gt = gt[:, 2, :, :, :]
+
+    return (pred * gt).sum() / gt.sum()
+
+
+@METRIC_REGISTRY.register()
+def overlap_no_argmax(pred, gt):
+    pred = pred[:, 1, ...]
+    gt = gt[:, 2, ...]
 
     return (pred * gt).sum() / gt.sum()
 

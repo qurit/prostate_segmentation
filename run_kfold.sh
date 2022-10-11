@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# usage: ./kfold_run.sh run_name
+# usage: ./run_kfold.sh run_name
 
 # assumes config is properly configured
 # i.e., TEST.FINAL_EVAL_METRICS is not empty

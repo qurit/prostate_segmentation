@@ -109,7 +109,7 @@ class Evaluator:
 
                     # apply thresholding if it is specified
                     if self.thresholds:
-                        preds[:] = self.threshold_predictions(preds.squeeze(1))
+                        preds[:] = self.threshold_predictions(preds.squeeze())
 
                     # make sure pred and labels have same number of channels
                     if preds.shape[1] < labels.shape[1]:
@@ -159,10 +159,14 @@ class Evaluator:
         }
 
     def threshold_predictions(self, preds: torch.Tensor) -> torch.Tensor:
-        new_preds = [
-            torch.where(pred >= thres, torch.ones_like(pred), torch.zeros_like(pred))
-            for thres, pred in zip(self.thresholds, preds)
-        ]
+        new_preds = []
+        for thres, pred in zip(self.thresholds, preds):
+            if thres is None:
+                new_preds.append(pred)
+                continue
+            new_preds.append(
+                torch.where(pred >= thres, torch.ones_like(pred), torch.zeros_like(pred))
+            )
 
         return torch.stack(new_preds)
 

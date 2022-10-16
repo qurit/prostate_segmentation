@@ -162,7 +162,8 @@ class BCEDiceLoss(nn.Module):
         self.logger = logging.getLogger(__name__)
 
         self.class_balanced = class_balanced
-    
+
+    @staticmethod
     def get_class_balanced_weights(target):
         epsilon = 1e-10
         num_classes = target.size()[1]
@@ -234,7 +235,7 @@ class BCEDiceOverlapLoss(BCEDiceLoss):
 
 @LOSS_REGISTRY.register()
 class BoundaryLoss(nn.Module):
-    def __init__(self, dice_weight, surface_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False):
+    def __init__(self, alpha_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False):
         super(BoundaryLoss, self).__init__()
         
         self.class_weight = None if not class_weight else torch.as_tensor(class_weight, dtype=torch.float)
@@ -242,22 +243,36 @@ class BoundaryLoss(nn.Module):
         self.surface = SurfaceLoss(self.class_weight)
         self.surface_weight = surface_weight
         
-        self.dice_weight = dice_weight
+        self.batch_count = 0
+        self.alpha_weight = alpha_weight
         self.normalization = normalization
-        self.dice = DiceLoss(normalization=normalization, weight=self.class_weight)
+        self.dice = GeneralizedDiceLoss(normalization=normalization)
         
         self.class_labels = class_labels
         self.logger = logging.getLogger(__name__)
 
         self.class_balanced = class_balanced
-    
+
+    @staticmethod
     def get_class_balanced_weights(target):
         epsilon = 1e-10
         num_classes = target.size()[1]
         weights = [target[:, 0, ...].sum() / (target[:, x, ...].sum() + epsilon) for x in range(num_classes)]
         return torch.as_tensor(weights, dtype=torch.float)
 
+    def update_alpha_weight(self):
+        if self.batch_count > 0 and (self.batch_count % 45 == 0):
+            if self.alpha_weight >= 0.02:
+                self.alpha_weight -= 0.01
+            else:
+                self.alpha_weight = 0.01
+
+        self.batch_count += 1
+
     def forward(self, input, data):
+
+        self.update_alpha_weight()
+
         target = data['labels']
         distms = data['dist_map']
 
@@ -278,8 +293,8 @@ class BoundaryLoss(nn.Module):
             self.dice = DiceLoss(normalization=self.normalization, weight=weights)
 
         return {
-            "dice": self.dice_weight * dice_loss.sum(),
-            "boundary": self.surface_weight * self.surface(input, distms)
+            "dice": self.alpha_weight * dice_loss.sum(),
+            "boundary": 1 - self.alpha_weight * self.surface(input, distms)
         }
 
 

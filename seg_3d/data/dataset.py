@@ -145,6 +145,7 @@ class ImageToImage3D(Dataset):
         self.patch_stride = patch_stride
         self.patch_halo = patch_halo
         self.attend_samples = kwargs.get('attend_samples', False)
+        self.attend_samples_all_axes = kwargs.get('attend_samples_all_axes', False)
         self.frame_dict_path = kwargs.get('attend_frame_dict_path', None)
         self.logger = logging.getLogger(__name__)
 
@@ -291,12 +292,41 @@ class ImageToImage3D(Dataset):
 
         # reduce the search space for finding tumor
         if self.attend_samples:
-            assert os.path.exists('seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
+            assert os.path.exists(
+                'seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
             frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
-            (start_frame, end_frame) = frame_dict[patient]
+            (start_frame, end_frame) = frame_dict[patient][1]
             mask = mask[:, start_frame:end_frame, ...]
             image = image[:, start_frame:end_frame, ...]
             dist_map = dist_map[:, start_frame:end_frame, ...]
+        elif self.attend_samples_all_axes:
+            assert os.path.exists(
+                'seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
+            frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
+            slices = tuple([slice(None)] + [slice(*i) for i in frame_dict[patient]])
+            mask = mask[:, slices]
+            image = image[:, slices]
+            dist_map = dist_map[:, slices]
+
+        elif self.mask_samples:
+            assert os.path.exists(
+                'seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
+
+            frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
+            slices = tuple([slice(None)] + [slice(*i) for i in frame_dict[patient]])
+            mask_cp = np.zeros_like(mask)
+            image_cp = np.zeros_like(image)
+            dist_map_cp = np.zeros_like(dist_map)
+
+            mask_cp[slices] = mask[slices]
+            mask = mask_cp
+
+            image_cp[slices] = image[slices]
+            image = image_cp
+
+            dist_map_cp[slices] = dist_map[slices]
+            dist_map = dist_map_cp
+
         return {
             "orig_image": orig_image,
             "image": image.float(),

@@ -13,6 +13,6 @@ COUNT=0;
 for CFG in `ls $DIR/*.yaml`
 do 
   echo "$COUNT: Running config $CFG...";
-  python -m seg_3d.train_loop -n "$(basename -- $CFG)" with "CONFIG_FILE=$CFG"
+  python -m seg_3d.train_loop -n "$(basename -- ${CFG%.yaml})" with "CONFIG_FILE=$CFG" "LOAD_ONLY_CFG_FILE=True"
   let COUNT++;
 done

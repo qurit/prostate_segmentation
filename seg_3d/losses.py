@@ -154,12 +154,14 @@ class BCEDiceLoss(nn.Module):
         self.dice = DiceLoss(normalization=normalization) if not self.gdl else GeneralizedDiceLoss(normalization=normalization)
 
         self.bce_weight = bce_weight
-        self.bce = nn.BCEWithLogitsLoss(pos_weight=self.class_weight.view(1, -1, 1, 1, 1).to(self.device))
+        self.bce = nn.BCEWithLogitsLoss()
+        if self.class_weight is not None:
+            self.bce.pos_weight = self.class_weight.view(1, -1, 1, 1, 1).to(self.device)
         
         self.class_labels = class_labels
         self.logger = logging.getLogger(__name__)
 
-        self.class_balanced = class_balanced if not self.gdl else None
+        self.class_balanced = class_balanced
     
     @staticmethod
     def get_class_balanced_weights(target):
@@ -248,14 +250,15 @@ class BoundaryBCEDiceLoss(nn.Module):
         self.gdl = gdl
         self.dice = DiceLoss(normalization=normalization) if not self.gdl else GeneralizedDiceLoss(normalization=normalization)
 
-        self.bce_class_weight = self.class_weight.view(1, len(class_weight), 1, 1, 1).to(self.device)
-        self.bce = nn.BCEWithLogitsLoss(pos_weight=self.bce_class_weight)
         self.bce_weight = bce_weight
+        self.bce = nn.BCEWithLogitsLoss()
+        if self.class_weight is not None:
+            self.bce.pos_weight = self.class_weight.view(1, -1, 1, 1, 1).to(self.device)
         
         self.class_labels = class_labels
         self.logger = logging.getLogger(__name__)
 
-        self.class_balanced = class_balanced if not self.gdl else None
+        self.class_balanced = class_balanced
         
     @staticmethod
     def get_class_balanced_weights(target):

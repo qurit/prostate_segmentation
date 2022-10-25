@@ -251,13 +251,15 @@ def train(model):
 
 @ex.main
 def main(_config, _run):
-    cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line
+    if "LOAD_ONLY_CFG_FILE" in _config and _config["LOAD_ONLY_CFG_FILE"]:
+        # next two lines are for when config file is specified in cmdline
+        cfg.merge_from_file(CN(_config).CONFIG_FILE)
+
+    else:
+        cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line
+
     name = _run.experiment_info["name"]
     base_dir = os.path.join("seg_3d/output", name)
-
-    # next two lines are for when config file is specified in cmdline
-    # cfg.merge_from_file(CN(_config).CONFIG_FILE)
-    # base_dir, cfg.OUTPUT_DIR = cfg.OUTPUT_DIR, None
 
     # make training deterministic
     seed_all(cfg.seed)
@@ -368,27 +370,27 @@ def main(_config, _run):
 
 @ex.config
 def config():
-    # pipeline params
-    # cfg.CONFIG_FILE = 'seg_3d/config/mm4-nds-attend-samples-fmaps64-onlytumor.yaml'
+    # # pipeline params
+    # cfg.CONFIG_FILE = 'seg_3d/output/bladder-gdl-with-overlap-128/1/config.yaml'
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
-    cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
+    # cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 
-    # kfold
-    cfg.DATASET.FOLD = 1
+    # # kfold
+    # cfg.DATASET.FOLD = 1
 
-    ## ADD MORE CONFIG CHANGES HERE ##
-    cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk
-    cfg.TEST.VIS_PREDS = True  # this runs the mask visualizer code at the end of training
-    # cfg.DATASET.TEST_PATIENT_KEYS = ['JGH01', 'JGH02', 'JGH03', 'JGH04', 'JGH05']
+    # ## ADD MORE CONFIG CHANGES HERE ##
+    # cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk
+    # cfg.TEST.VIS_PREDS = True  # this runs the mask visualizer code at the end of training
+    # # cfg.DATASET.TEST_PATIENT_KEYS = ['JGH01', 'JGH02', 'JGH03', 'JGH04', 'JGH05']
 
-    ############################################
+    # ###########################################
     # add to sacred experiment
     ex.add_config(cfg)
 
     # sacred params
     seed = 99  # comment this out to disable deterministic experiments
-    tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
-    tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
+    # tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
+    # tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
 
 
 if __name__ == '__main__':

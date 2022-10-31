@@ -254,6 +254,7 @@ def main(_config, _run):
     if "LOAD_ONLY_CFG_FILE" in _config and _config["LOAD_ONLY_CFG_FILE"]:
         # next two lines are for when config file is specified in cmdline
         cfg.merge_from_file(CN(_config).CONFIG_FILE)
+        cfg.OUTPUT_DIR = None
 
     else:
         cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line

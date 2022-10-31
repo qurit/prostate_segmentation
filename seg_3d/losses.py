@@ -237,15 +237,17 @@ class BCEDiceOverlapLoss(BCEDiceLoss):
 
 @LOSS_REGISTRY.register()
 class BoundaryBCEDiceLoss(nn.Module):
-    def __init__(self, bce_weight, dice_weight, surface_weight, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False, gdl=False):
+    def __init__(self, bce_weight=0, dice_weight=0, surface_weight=0, alpha_weight=None, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False, gdl=False):
         super(BoundaryBCEDiceLoss, self).__init__()
         self.device = "cpu" if not torch.cuda.is_available() else "cuda"
         self.class_weight = None if not class_weight else torch.as_tensor(class_weight, dtype=torch.float)
 
+        self.alpha_weight = alpha_weight
         self.surface = SurfaceLoss(self.class_weight)
         self.surface_weight = surface_weight
         
         self.dice_weight = dice_weight
+        self.batch_count = 0
         self.normalization = normalization
         self.gdl = gdl
         self.dice = DiceLoss(normalization=normalization) if not self.gdl else GeneralizedDiceLoss(normalization=normalization)
@@ -267,7 +269,21 @@ class BoundaryBCEDiceLoss(nn.Module):
         weights = [target[:, 0, ...].sum() / (target[:, x, ...].sum() + epsilon) for x in range(num_classes)]
         return torch.as_tensor(weights, dtype=torch.float)
 
+    def update_alpha_weight(self):
+        if self.alpha_weight is None:
+            return
+        if self.batch_count > 0 and (self.batch_count % 45 == 0):  # TODO: confirm numbers
+            if self.alpha_weight >= 0.02:
+                self.alpha_weight -= 0.01
+            else:
+                self.alpha_weight = 0.01
+
+        self.batch_count += 1
+        self.logger.info(("alpha weight: {}").format(self.alpha_weight))
+
     def forward(self, input, data):
+        self.update_alpha_weight()
+
         target = data['labels']
         distms = data['dist_map']
     
@@ -288,6 +304,13 @@ class BoundaryBCEDiceLoss(nn.Module):
                 dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
 
             self.logger.info(("Dice: " + "{}" * len(dice_log)).format(*dice_log))
+
+        if self.alpha_weight is not None:
+            return {
+                "dice": self.alpha_weight * dice_loss.sum(),
+                "bce": self.bce_weight * self.bce(input, target),
+                "boundary": (1 - self.alpha_weight) * self.surface(input, distms)
+            }
 
         return {
             "dice": self.dice_weight * dice_loss.sum(),

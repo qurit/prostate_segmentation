@@ -237,12 +237,16 @@ class BCEDiceOverlapLoss(BCEDiceLoss):
 
 @LOSS_REGISTRY.register()
 class BoundaryBCEDiceLoss(nn.Module):
-    def __init__(self, bce_weight=0, dice_weight=0, surface_weight=0, alpha_weight=None, normalization="softmax", class_labels=None, class_weight=None, class_balanced=False, gdl=False):
+    def __init__(self, bce_weight=0, dice_weight=0, surface_weight=0, alpha_weight=None, iter_per_alpha_update=None,
+                 normalization="softmax", class_labels=None, class_weight=None, class_balanced=False, gdl=False):
         super(BoundaryBCEDiceLoss, self).__init__()
         self.device = "cpu" if not torch.cuda.is_available() else "cuda"
         self.class_weight = None if not class_weight else torch.as_tensor(class_weight, dtype=torch.float)
 
         self.alpha_weight = alpha_weight
+        self.iter_per_alpha_update = iter_per_alpha_update
+        if alpha_weight or iter_per_alpha_update: assert alpha_weight is not None and iter_per_alpha_update is not None
+
         self.surface = SurfaceLoss(self.class_weight)
         self.surface_weight = surface_weight
         
@@ -272,7 +276,7 @@ class BoundaryBCEDiceLoss(nn.Module):
     def update_alpha_weight(self):
         if self.alpha_weight is None:
             return
-        if self.batch_count > 0 and (self.batch_count % 45 == 0):  # TODO: confirm numbers
+        if self.batch_count > 0 and (self.batch_count % self.iter_per_alpha_update == 0):
             if self.alpha_weight >= 0.02:
                 self.alpha_weight -= 0.01
             else:

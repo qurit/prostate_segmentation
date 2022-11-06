@@ -287,9 +287,9 @@ class ImageToImage3D(Dataset):
 
         # reduce the search space for finding tumor
         if self.attend_samples:
-            start_frame, end_frame = self.process_attend_indices(mask=mask, axes=(1,2))
-            mask = mask[:, start_frame:end_frame, ...]
-            image = image[:, start_frame:end_frame, ...]
+            depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
+            mask = mask[:, depth_bounds[0]:depth_bounds[1], ...]
+            image = image[:, depth_bounds[0]:depth_bounds[1], ...]
 
         elif self.attend_samples_all_axes:
             depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
@@ -360,7 +360,7 @@ class ImageToImage3D(Dataset):
 
         if "Tumor" in self.roi_modality_map:
             # call helper function to process tumor mask
-            self.process_tumor_mask(mask)
+            mask = self.process_tumor_mask(mask)
         else:
             # add logic here for other combinations of rois
             pass
@@ -387,18 +387,20 @@ class ImageToImage3D(Dataset):
 
         # update tumor mask in the mask dict
         mask["Tumor"] = tumor_mask
+
+        return mask
     
     def process_attend_indices(self, mask, axes):
         mins = []
         maxs = []
-        for roi in ['Bladder', 'Prostate']:
-            roi_idx = self.class_labels.index(roi)
+        for roi in ['Bladder', 'Inter']:
+            roi_idx = self.class_labels.index(roi) - 1
             bounds = mask[roi_idx].sum(axis=axes)
-            bounds = np.nonzero(bounds)
+            bounds = np.nonzero(bounds)[0]
             mins.append(bounds[0])
             maxs.append(bounds[-1])
 
-        return (min(mins), max(maxs))
+        return (min(mins), max(maxs) + 1)
 
 
 

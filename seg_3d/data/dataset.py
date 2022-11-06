@@ -279,12 +279,6 @@ class ImageToImage3D(Dataset):
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)
 
-        # apply transforms and convert to tensors
-        image, mask = self.joint_transform(image, mask)
-
-        # compute distance map for boundary loss
-        dist_map = one_hot2dist(np.asarray(mask), (1, 1, 1))
-
         if self.patch_wise and self.patch_size is not None:
             patch_idx = idx % len(self.slicer.raw_slices)
             patch_im_slice = self.slicer.raw_slices[patch_idx]
@@ -293,31 +287,29 @@ class ImageToImage3D(Dataset):
 
         # reduce the search space for finding tumor
         if self.attend_samples:
-            assert os.path.exists(
-                'seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
-            frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
-            (start_frame, end_frame) = frame_dict[patient][1]
+            start_frame, end_frame = self.process_attend_indices(mask=mask, axes=(1,2))
             mask = mask[:, start_frame:end_frame, ...]
             image = image[:, start_frame:end_frame, ...]
-            dist_map = dist_map[:, start_frame:end_frame, ...]
+
         elif self.attend_samples_all_axes:
-            assert os.path.exists(
-                'seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
-            frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
-            slices = tuple([slice(None)] + [slice(*i) for i in frame_dict[patient]])
-            mask = mask[:, slices]
-            image = image[:, slices]
-            dist_map = dist_map[:, slices]
+            depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
+            width_bounds = self.process_attend_indices(mask=mask, axes=(0,2))
+            height_bounds = self.process_attend_indices(mask=mask, axes=(0,1))
+
+            slices = tuple([slice(None)] + [slice(*i) for i in [depth_bounds, width_bounds, height_bounds]])
+
+            mask = mask[slices]
+            image = image[slices]
 
         elif self.mask_samples:
-            assert os.path.exists(
-                'seg_3d/data/attend_frame_range.npy'), 'FRAME DICT PATH DOES NOT EXIST!!'
+            depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
+            width_bounds = self.process_attend_indices(mask=mask, axes=(0,2))
+            height_bounds = self.process_attend_indices(mask=mask, axes=(0,1))
 
-            frame_dict = np.load(self.frame_dict_path, allow_pickle='TRUE').item()
-            slices = tuple([slice(None)] + [slice(*i) for i in frame_dict[patient]])
+            slices = tuple([slice(None)] + [slice(*i) for i in [depth_bounds, width_bounds, height_bounds]])
+
             mask_cp = np.zeros_like(mask)
             image_cp = np.zeros_like(image)
-            dist_map_cp = np.zeros_like(dist_map)
 
             mask_cp[slices] = mask[slices]
             mask = mask_cp
@@ -325,8 +317,11 @@ class ImageToImage3D(Dataset):
             image_cp[slices] = image[slices]
             image = image_cp
 
-            dist_map_cp[slices] = dist_map[slices]
-            dist_map = dist_map_cp
+        # apply transforms and convert to tensors
+        image, mask = self.joint_transform(image, mask)
+
+        # compute distance map for boundary loss
+        dist_map = one_hot2dist(np.asarray(mask), (1, 1, 1))
 
         return {
             "orig_image": orig_image,
@@ -392,6 +387,19 @@ class ImageToImage3D(Dataset):
 
         # update tumor mask in the mask dict
         mask["Tumor"] = tumor_mask
+    
+    def process_attend_indices(self, mask, axes):
+        mins = []
+        maxs = []
+        for roi in ['Bladder', 'Prostate']:
+            roi_idx = self.class_labels.index(roi)
+            bounds = mask[roi_idx].sum(axis=axes)
+            bounds = np.nonzero(bounds)
+            mins.append(bounds[0])
+            maxs.append(bounds[-1])
+
+        return (min(mins), max(maxs))
+
 
 
 class Image3D(Dataset):

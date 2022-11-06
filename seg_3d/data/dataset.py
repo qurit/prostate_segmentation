@@ -292,21 +292,17 @@ class ImageToImage3D(Dataset):
             image = image[:, depth_bounds[0]:depth_bounds[1], ...]
 
         elif self.attend_samples_all_axes:
-            depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
-            width_bounds = self.process_attend_indices(mask=mask, axes=(0,2))
-            height_bounds = self.process_attend_indices(mask=mask, axes=(0,1))
-
-            slices = tuple([slice(None)] + [slice(*i) for i in [depth_bounds, width_bounds, height_bounds]])
+            
+            bounds_list = [self.process_attend_indices(mask=mask, axes=x) for x in [(1,2), (0,2), (0,1)]]
+            slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
 
             mask = mask[slices]
             image = image[slices]
 
         elif self.mask_samples:
-            depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
-            width_bounds = self.process_attend_indices(mask=mask, axes=(0,2))
-            height_bounds = self.process_attend_indices(mask=mask, axes=(0,1))
 
-            slices = tuple([slice(None)] + [slice(*i) for i in [depth_bounds, width_bounds, height_bounds]])
+            bounds_list = [self.process_attend_indices(mask=mask, axes=x) for x in [(1,2), (0,2), (0,1)]]
+            slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
 
             mask_cp = np.zeros_like(mask)
             image_cp = np.zeros_like(image)

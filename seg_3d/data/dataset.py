@@ -146,6 +146,7 @@ class ImageToImage3D(Dataset):
         self.patch_halo = patch_halo
         self.attend_samples = kwargs.get('attend_samples', False)
         self.attend_samples_all_axes = kwargs.get('attend_samples_all_axes', False)
+        self.mask_samples = kwargs.get('mask_samples', False)
         self.frame_dict_path = kwargs.get('attend_frame_dict_path', None)
         self.logger = logging.getLogger(__name__)
 

@@ -386,7 +386,7 @@ def config():
 
     # ###########################################
     # add to sacred experiment
-    ex.add_config(cfg)
+    ex.add_config(cfg)  # NOTE: for run_configs.sh script everything above in config() should be commented out!!
 
     # sacred params
     seed = 99  # comment this out to disable deterministic experiments

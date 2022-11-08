@@ -291,13 +291,13 @@ class ImageToImage3D(Dataset):
 
         # reduce the search space for finding tumor
         if self.attend_samples:
-            depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
+            depth_bounds = self.process_attend_indices_frames(mask=mask)
             mask = mask[:, depth_bounds[0]:depth_bounds[1], ...]
             image = image[:, depth_bounds[0]:depth_bounds[1], ...]
 
         elif self.attend_samples_all_axes:
-            
-            bounds_list = [self.process_attend_indices(mask=mask, axes=x) for x in [(1,2), (0,2), (0,1)]]
+            depth_bounds = self.process_attend_indices_frames(mask=mask)
+            bounds_list = [depth_bounds] + [self.process_attend_indices(mask=mask, axes=x) for x in [(0,2), (0,1)]]
             slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
 
             mask = mask[slices]
@@ -305,7 +305,8 @@ class ImageToImage3D(Dataset):
 
         elif self.mask_samples:
 
-            bounds_list = [self.process_attend_indices(mask=mask, axes=x) for x in [(1,2), (0,2), (0,1)]]
+            depth_bounds = self.process_attend_indices_frames(mask=mask)
+            bounds_list = [depth_bounds] + [self.process_attend_indices(mask=mask, axes=x) for x in [(0,2), (0,1)]]
             slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
 
             mask_cp = np.zeros_like(mask)
@@ -399,17 +400,54 @@ class ImageToImage3D(Dataset):
 
         return mask
     
-    def process_attend_indices(self, mask, axes):
+    def process_attend_indices_spatial(self, mask, axes, padding_margin=0.05):
         mins = []
         maxs = []
+        padding = None
+        dim_max = None
+        
         for roi in ['Bladder', 'Inter']:
             roi_idx = self.class_labels.index(roi) - 1
             bounds = mask[roi_idx].sum(axis=axes)
+            if dim_max is None:
+                dim_max = bounds.shape[0]
+            if padding is None:
+                padding = round(dim_max * padding_margin)
             bounds = np.nonzero(bounds)[0]
             mins.append(bounds[0])
             maxs.append(bounds[-1])
+        
+        start_bound = min(mins)
+        start_bound = start_bound - padding if start_bound - padding >= 0 else 0
 
-        return (min(mins) - 10, max(maxs) + 10 + 1)
+        end_bound = max(maxs)
+        end_bound = end_bound + padding + 1 if end_bound + padding <= dim_max else dim_max + 1
+
+        return (start_bound, end_bound)
+    
+    def process_attend_indices_frames(self, mask, padding_margin=0.05):
+
+        summed_axial_mask = {}
+        
+        for roi in ['Bladder', 'Inter']:
+            roi_idx = self.class_labels.index(roi) - 1
+            bounds = mask[roi_idx].sum(axis=(1,2))
+            bounds = np.nonzero(bounds)[0]
+            summed_axial_mask[roi] = bounds
+
+        prostate, bladder = summed_axial_mask['Inter'], summed_axial_mask['Bladder']
+        dim_max = prostate.shape[0]
+        padding = round(dim_max * padding_margin)
+        
+        prostate_start = min(prostate)
+        start_bound = prostate_start - padding if prostate_start - padding >= 0 else 0
+
+        prostate_end, bladder_end = max(prostate), max(bladder)
+
+        end_bound = prostate_end + round((bladder_end - prostate_end) * 0.5)
+        end_bound = end_bound + 1 if end_bound <= dim_max else dim_max + 1
+
+        return (start_bound, end_bound)
 
 
 

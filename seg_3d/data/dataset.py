@@ -285,6 +285,10 @@ class ImageToImage3D(Dataset):
             patch_lab_slice = self.slicer.label_slices[patch_idx]
             image, mask = image[patch_im_slice], mask[patch_lab_slice]
 
+        # confirm attends logic does not remove any label information
+        if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
+            mask_sums = [item.sum() for item in mask]
+
         # reduce the search space for finding tumor
         if self.attend_samples:
             depth_bounds = self.process_attend_indices(mask=mask, axes=(1,2))
@@ -312,6 +316,15 @@ class ImageToImage3D(Dataset):
 
             image_cp[slices] = image[slices]
             image = image_cp
+
+        if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
+            if not all([item.sum() == old_sum for item, old_sum in zip(mask, mask_sums)]):
+                self.logger.error(f'Lost label information during attend samples for patient {patient}')
+                for m, old_sum, roi in zip(mask, mask_sums, self.class_labels[1:]):
+                    print('roi', roi)
+                    print('original sum', old_sum)
+                    print('new sum', m.sum())
+                exit(1)
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
@@ -396,7 +409,7 @@ class ImageToImage3D(Dataset):
             mins.append(bounds[0])
             maxs.append(bounds[-1])
 
-        return (min(mins), max(maxs) + 1)
+        return (min(mins) - 10, max(maxs) + 10 + 1)
 
 
 

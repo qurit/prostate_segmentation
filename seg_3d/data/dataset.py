@@ -401,26 +401,25 @@ class ImageToImage3D(Dataset):
         return mask
     
     def process_attend_indices_spatial(self, mask, axes, padding_margin=0.05):
-        mins = []
-        maxs = []
-        padding = None
+        start_bound = np.inf
+        end_bound = 0
+        
         dim_max = None
         
         for roi in ['Bladder', 'Inter']:
             roi_idx = self.class_labels.index(roi) - 1
             bounds = mask[roi_idx].sum(axis=axes)
+            
             if dim_max is None:
                 dim_max = bounds.shape[0]
-            if padding is None:
-                padding = round(dim_max * padding_margin)
-            bounds = np.nonzero(bounds)[0]
-            mins.append(bounds[0])
-            maxs.append(bounds[-1])
-        
-        start_bound = min(mins)
-        start_bound = start_bound - padding if start_bound - padding >= 0 else 0
 
-        end_bound = max(maxs)
+            bounds = np.nonzero(bounds)[0]
+            start_bound = bounds[0] if bounds[0] < start_bound else start_bound
+            end_bound = bounds[-1] if bounds[-1] > end_bound else end_bound
+        
+        padding = round(dim_max * padding_margin)
+
+        start_bound = start_bound - padding if start_bound - padding >= 0 else 0
         end_bound = end_bound + padding + 1 if end_bound + padding <= dim_max else dim_max + 1
 
         return (start_bound, end_bound)
@@ -439,12 +438,9 @@ class ImageToImage3D(Dataset):
         dim_max = prostate.shape[0]
         padding = round(dim_max * padding_margin)
         
-        prostate_start = min(prostate)
-        start_bound = prostate_start - padding if prostate_start - padding >= 0 else 0
+        start_bound = prostate[0] - padding if prostate[0] - padding >= 0 else 0
 
-        prostate_end, bladder_end = max(prostate), max(bladder)
-
-        end_bound = prostate_end + round((bladder_end - prostate_end) * 0.5)
+        end_bound = prostate[-1] + round((bladder[-1] - prostate[-1]) * 0.5)
         end_bound = end_bound + 1 if end_bound <= dim_max else dim_max + 1
 
         return (start_bound, end_bound)

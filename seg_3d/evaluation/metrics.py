@@ -230,6 +230,46 @@ def classwise_f1_v2(pred, gt):
     return f1[1]
 
 
+@METRIC_REGISTRY.register()
+def tumor_detection_10(pred, gt):
+    tumor_channel = 2
+
+    pred, gt = pred[:, tumor_channel, ...], gt[:, tumor_channel, ...]
+
+    dice_score = classwise_dice_score(pred, gt)
+
+    if dice_score > 0.1:
+        return 1
+    else:
+        return 0
+
+@METRIC_REGISTRY.register()
+def tumor_detection_20(pred, gt):
+    tumor_channel = 2
+
+    pred, gt = pred[:, tumor_channel, ...], gt[:, tumor_channel, ...]
+
+    dice_score = classwise_dice_score(pred, gt)
+
+    if dice_score > 0.2:
+        return 1
+    else:
+        return 0
+
+@METRIC_REGISTRY.register()
+def tumor_detection_30(pred, gt):
+    tumor_channel = 2
+
+    pred, gt = pred[:, tumor_channel, ...], gt[:, tumor_channel, ...]
+
+    dice_score = classwise_dice_score(pred, gt)
+
+    if dice_score > 0.3:
+        return 1
+    else:
+        return 0
+
+
 def get_metrics(metrics: List[str]):
     return {
         metric: METRIC_REGISTRY.get(metric) for metric in metrics

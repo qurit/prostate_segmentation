@@ -287,7 +287,7 @@ class ImageToImage3D(Dataset):
 
         # confirm attends logic does not remove any label information
         if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
-            mask_sums = [item.sum() for item in mask]
+            mask_sum = mask[self.class_labels.index('Tumor') - 1].sum()
 
         # reduce the search space for finding tumor
         if self.attend_samples:
@@ -297,7 +297,7 @@ class ImageToImage3D(Dataset):
 
         elif self.attend_samples_all_axes:
             depth_bounds = self.process_attend_indices_frames(mask=mask)
-            bounds_list = [depth_bounds] + [self.process_attend_indices(mask=mask, axes=x) for x in [(0,2), (0,1)]]
+            bounds_list = [depth_bounds] + [self.process_attend_indices_spatial(mask=mask, axes=x) for x in [(0,2), (0,1)]]
             slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
 
             mask = mask[slices]
@@ -306,7 +306,7 @@ class ImageToImage3D(Dataset):
         elif self.mask_samples:
 
             depth_bounds = self.process_attend_indices_frames(mask=mask)
-            bounds_list = [depth_bounds] + [self.process_attend_indices(mask=mask, axes=x) for x in [(0,2), (0,1)]]
+            bounds_list = [depth_bounds] + [self.process_attend_indices_spatial(mask=mask, axes=x) for x in [(0,2), (0,1)]]
             slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
 
             mask_cp = np.zeros_like(mask)
@@ -319,12 +319,10 @@ class ImageToImage3D(Dataset):
             image = image_cp
 
         if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
-            if not all([item.sum() == old_sum for item, old_sum in zip(mask, mask_sums)]):
+            if not mask_sum == mask[self.class_labels.index('Tumor') - 1].sum():
                 self.logger.error(f'Lost label information during attend samples for patient {patient}')
-                for m, old_sum, roi in zip(mask, mask_sums, self.class_labels[1:]):
-                    print('roi', roi)
-                    print('original sum', old_sum)
-                    print('new sum', m.sum())
+                print('original tumor sum', mask_sum)
+                print('new tumor sum', mask[self.class_labels.index('Tumor') - 1].sum())
                 exit(1)
 
         # apply transforms and convert to tensors
@@ -400,12 +398,12 @@ class ImageToImage3D(Dataset):
 
         return mask
     
-    def process_attend_indices_spatial(self, mask, axes, padding_margin=0.05):
+    def process_attend_indices_spatial(self, mask, axes, padding_margin=0.1):
         start_bound = np.inf
         end_bound = 0
         
         dim_max = None
-        
+
         for roi in ['Bladder', 'Inter']:
             roi_idx = self.class_labels.index(roi) - 1
             bounds = mask[roi_idx].sum(axis=axes)
@@ -414,17 +412,17 @@ class ImageToImage3D(Dataset):
                 dim_max = bounds.shape[0]
 
             bounds = np.nonzero(bounds)[0]
-            start_bound = bounds[0] if bounds[0] < start_bound else start_bound
-            end_bound = bounds[-1] if bounds[-1] > end_bound else end_bound
+            start_bound = min(bounds[0], start_bound)
+            end_bound = max(bounds[-1], end_bound)
         
         padding = round(dim_max * padding_margin)
 
-        start_bound = start_bound - padding if start_bound - padding >= 0 else 0
-        end_bound = end_bound + padding + 1 if end_bound + padding <= dim_max else dim_max + 1
+        start_bound = max(0, start_bound - padding)
+        end_bound = min(mask.shape[2], end_bound + padding)
 
         return (start_bound, end_bound)
     
-    def process_attend_indices_frames(self, mask, padding_margin=0.05):
+    def process_attend_indices_frames(self, mask, padding_margin=0.2, alpha=0.6):
 
         summed_axial_mask = {}
         
@@ -437,11 +435,9 @@ class ImageToImage3D(Dataset):
         prostate, bladder = summed_axial_mask['Inter'], summed_axial_mask['Bladder']
         dim_max = prostate.shape[0]
         padding = round(dim_max * padding_margin)
-        
-        start_bound = prostate[0] - padding if prostate[0] - padding >= 0 else 0
-
-        end_bound = prostate[-1] + round((bladder[-1] - prostate[-1]) * 0.5)
-        end_bound = end_bound + 1 if end_bound <= dim_max else dim_max + 1
+        start_bound = max(0, prostate[0] - padding)
+        end_bound = np.ceil(((alpha * bladder[-1]) + (1 - alpha) * prostate[-1])).astype(int)
+        end_bound = min(mask.shape[1], end_bound + padding)
 
         return (start_bound, end_bound)
 

@@ -613,7 +613,8 @@ def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
     # here we can use standard dice (input + target).sum(-1) or extension (see V-Net) (input^2 + target^2).sum(-1)
     denominator = (input * input).sum(-1) + (target * target).sum(-1)
 
-    dice = 2 * (intersect / denominator.clamp(min=epsilon))
+    # smoothing term added to both numerator and denominator https://arxiv.org/pdf/2207.09521.pdf
+    dice = (2 * intersect + epsilon) / (denominator + epsilon)
 
     return dice
 

@@ -52,7 +52,7 @@ class JointTransform3D:
 
         # divide by scan max
         if self.div_by_max:
-            image = image / np.max(image)
+            image = np.asarray([im / im.max() for im in image])
 
         # get number of channels in image
         img_channels = len(image)

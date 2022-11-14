@@ -147,7 +147,8 @@ class MaskVisualizer:
                 a, b = int(j / axs.shape[1]), int(j % axs.shape[1])
 
                 # show sample and annotate plot
-                axs[a, b].imshow(centre_crop(X[i], self.crop_size), cmap=self.sample_cmap)
+                im = axs[a, b].imshow(centre_crop(X[i], self.crop_size), cmap=self.sample_cmap)
+                cb = plt.colorbar(im, ax=axs[a, b], shrink=0.7)
                 axs[a, b].set_title("Sample")
                 axs[a, b].set_xlabel("x")
                 axs[a, b].set_ylabel("y")

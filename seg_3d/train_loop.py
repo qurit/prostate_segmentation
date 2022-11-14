@@ -310,6 +310,7 @@ def main(_config, _run):
     with PathManager().open(cfg_path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(cfg_path))
+    _run.add_artifact(cfg_path, 'config')  # make its easier to download from omniboard
 
     # get model and load onto device
     model = build_model(cfg)

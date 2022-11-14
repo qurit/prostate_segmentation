@@ -117,9 +117,15 @@ def train(model):
                         sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.seed))
             ):
 
-                storage.iter = iteration
-                sample = batched_inputs["image"]
+                storage.step()
+
+                # extract data from item recieved from data loader
+                patients = batched_inputs["patient"]
+                orig_imgs = batched_inputs["orig_image"]
+                sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
+                data = {'labels': labels,
+                        'dist_map': batched_inputs["dist_map"].to(cfg.MODEL.DEVICE)}
 
                 optimizer.zero_grad()
 
@@ -127,17 +133,19 @@ def train(model):
                 with autocast(enabled=cfg.AMP_ENABLED):
                     # do a forward pass, input is of shape (N, C, D, H, W)
                     preds = model(sample)
-                    training_loss = loss(preds, labels)  # https://github.com/wolny/pytorch-3dunet#training-tips
+                    training_loss = loss(preds, data)  # https://github.com/wolny/pytorch-3dunet#training-tips
 
                     # check if need to process masks and images to be visualized in tensorboard
-                    if iteration - start_iter < 5 or (iteration + 1) % 40 == 0:
-                        for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
-                                               [batched_inputs["orig_image"], sample, labels, preds]):
-                            tags_imgs = tensorboard_img_formatter(name=name, batch=batch.detach().cpu())
+                    for idx, p in enumerate(patients):
+                        if p in train_dataset.patient_keys[:4]:
+                            for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
+                                                   [orig_imgs, sample, labels, preds]):
+                                tags_imgs = tensorboard_img_formatter(name=p + "/" + name,
+                                                                      batch=batch[idx].unsqueeze(0).detach().cpu())
 
-                            # add each tag image tuple to tensorboard
-                            for item in tags_imgs:
-                                storage.put_image(*item)
+                                # add each tag image tuple to tensorboard
+                                for item in tags_imgs:
+                                    storage.put_image(*item)
 
                 # loss can either return a dict of losses or just a single tensor
                 loss_dict = {}
@@ -211,6 +219,7 @@ def train(model):
 
             if cfg.TEST.FINAL_EVAL_METRICS and model_checkpoint in checkpointer.get_all_checkpoint_files():
                 logger.info("Running final evaluation with best model...")
+                evaluator.thresholds = cfg.TEST.THRESHOLDS
 
                 # add weight file to db
                 ex.add_artifact(os.path.join(cfg.OUTPUT_DIR, "model_best.pth"), content_type="weights")
@@ -223,7 +232,7 @@ def train(model):
                 # configure mask visualizer if specified
                 if cfg.TEST.VIS_PREDS:
                     evaluator.set_mask_visualizer(
-                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")  # skip label for bgd
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")  # skip label for bgd
                     )
 
                 # run evaluation
@@ -242,15 +251,25 @@ def train(model):
 
 @ex.main
 def main(_config, _run):
-    cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line
+    if "LOAD_ONLY_CFG_FILE" in _config and _config["LOAD_ONLY_CFG_FILE"]:
+        # next two lines are for when config file is specified in cmdline
+        cfg.merge_from_file(CN(_config).CONFIG_FILE)
+        cfg.OUTPUT_DIR = None
 
-    # make training deterministic
-    seed_all(cfg.seed)
+    else:
+        cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line
+
     name = _run.experiment_info["name"]
     base_dir = os.path.join("seg_3d/output", name)
 
+    # make training deterministic
+    seed_all(cfg.seed)
+
     if cfg.DATASET.FOLD is not None:
         base_dir = os.path.join(base_dir, str(cfg.DATASET.FOLD))
+        cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
+        cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
+        cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
 
     if any([cfg.EVAL_ONLY, cfg.PRED_ONLY, cfg.RESUME]) and not cfg.MODEL.WEIGHTS:
         # get model weight file if not specified
@@ -271,7 +290,7 @@ def main(_config, _run):
 
     cfg.freeze()  # freeze all parameters i.e. no more changes can be made to config
     # make sure latest version of config is saved to mongo db
-    if ex.observers != 0:
+    if ex.observers != 0 and ex.observers[0].run_entry is not None:
         ex.observers[0].run_entry["config"] = cfg
 
     # save logs to output directory
@@ -291,6 +310,7 @@ def main(_config, _run):
     with PathManager().open(cfg_path, "w") as f:
         f.write(cfg.dump())
     logger.info("Full config saved to {}".format(cfg_path))
+    _run.add_artifact(cfg_path, 'config')  # make its easier to download from omniboard
 
     # get model and load onto device
     model = build_model(cfg)
@@ -307,20 +327,21 @@ def main(_config, _run):
         eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
-                                      patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
+                                      num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
+                                      patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
                                       joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)
 
         # init eval metrics and evaluator
-        metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
+        metric_list = MetricList(metrics=get_metrics(cfg.TEST.FINAL_EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
         evaluator = Evaluator(device=cfg.MODEL.DEVICE, dataset=test_dataset,
                               metric_list=metric_list, thresholds=cfg.TEST.THRESHOLDS)
 
         # configure mask visualizer if specified
         if cfg.TEST.VIS_PREDS:
             evaluator.set_mask_visualizer(
-                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks")
+                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")
             )
 
         results = evaluator.evaluate(model)
@@ -328,8 +349,9 @@ def main(_config, _run):
             # add to sacred experiment
             ex.log_scalar(k, float(v), step=0)
         # save inference results
-        with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
-            pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
+        if cfg.TEST.INFERENCE_FILE_NAME:
+            with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
+                pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
         return
 
     elif cfg.PRED_ONLY:  # TODO
@@ -350,24 +372,27 @@ def main(_config, _run):
 
 @ex.config
 def config():
-    # pipeline params
-    # cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
+    # # pipeline params
+    # cfg.CONFIG_FILE = 'seg_3d/output/bladder-gdl-with-overlap-128/1/config.yaml'
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
-    cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
+    # cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 
-    # kfold
-    cfg.DATASET.FOLD = 1
-    cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
-    cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
-    cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
+    # # kfold
+    # cfg.DATASET.FOLD = 1
 
+    # ## ADD MORE CONFIG CHANGES HERE ##
+    # cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk
+    # cfg.TEST.VIS_PREDS = True  # this runs the mask visualizer code at the end of training
+    # # cfg.DATASET.TEST_PATIENT_KEYS = ['JGH01', 'JGH02', 'JGH03', 'JGH04', 'JGH05']
+
+    # ###########################################
     # add to sacred experiment
-    ex.add_config(cfg)
+    ex.add_config(cfg)  # NOTE: for run_configs.sh script everything above in config() should be commented out!!
 
     # sacred params
     seed = 99  # comment this out to disable deterministic experiments
-    tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
-    tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
+    # tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
+    # tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
 
 
 if __name__ == '__main__':

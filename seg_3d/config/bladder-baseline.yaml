@@ -3,20 +3,26 @@ AMP_ENABLED: false
 DATASET:
   CLASS_LABELS:
   - Background
-  - Inter
+  - Bladder
+  - Tumor
+  FOLD: 1
   PARAMS:
     crop_size:
-    - 250
-    - 250
-    modality: CT
+    - 140
+    - 140
     modality_roi_map:
-    - CT:
-      - Inter
-    num_slices: 100
+    - PT:
+      - Bladder
+      - Tumor
+      - Tumor2
+      - Tumor3
+    num_slices: 128
   TEST_DATASET_PATH:
   - data/image_dataset
+  - data/test_dataset
   TRAIN_DATASET_PATH:
   - data/image_dataset
+  - data/test_dataset
 EARLY_STOPPING:
   MODE: min
   MONITOR: val_loss
@@ -28,69 +34,65 @@ LOSS:
     bce_weight: 1.0
     class_labels:
     - Background
-    - Inter
+    - Bladder
+    - Tumor
     class_weight:
     - 0
     - 1
+    - 0
     class_weight_loss: both
     dice_weight: 1.0
     normalization: sigmoid
-    overlap_idx: null
-    overlap_weight: 0
+    overlap_idx:
+    - 1
+    - 2
+    overlap_weight: 1.0
 MODEL:
   BACKBONE:
     NAME: UNet3D
   DEVICE: cuda
   META_ARCHITECTURE: SemanticSegNet
   UNET:
-    f_maps: 16
+    f_maps: 32
     final_sigmoid: true
     in_channels: 1
-    out_channels: 2
-  WEIGHTS: ''
+    out_channels: 3
 NUM_WORKERS: 6
 PRED_ONLY: false
 RESUME: false
-SEED: 99
 SOLVER:
-  CHECKPOINT_PERIOD: 200
+  CHECKPOINT_PERIOD: 1000
   GAMMA: 0.1
   IMS_PER_BATCH: 2
-  MAX_ITER: 1000000
+  MAX_ITER: 1000
   OPTIM: Adam
   PARAMS:
-    lr: 0.0001
+    lr: 0.0005
   STEPS:
-  - 240
-  - 480
+  - 300
   - 700
   WARMUP_FACTOR: 0.001
-  WARMUP_ITERS: 0
-  WARMUP_METHOD: linear
+  WARMUP_ITERS: 100
 TEST:
   EVAL_METRICS:
   - classwise_dice_score
   - argmax_dice_score
+  - overlap
   EVAL_PERIOD: 20
   FINAL_EVAL_METRICS:
   - ssim
   - hausdorff
   - classwise_dice_score
   - argmax_dice_score
-  INFERENCE_FILE_NAME: inference.pk
+  - overlap
+  INFERENCE_FILE_NAME: null
   THRESHOLDS: null
   VIS_PREDS: false
 TRANSFORMS:
   crop:
-  - 200
-  - 200
-  deform_points:
-  - 3
-  - 3
-  - 3
-  deform_sigma: 5
-  div_by_max: false
-  multi_scale:
-  - 0.85
-  - 1.15
-  p_flip: 0.5
+  - 128
+  - 128
+  deform_sigma: null
+  div_by_max: true
+  multi_scale: null
+  p_flip: null

@@ -13,6 +13,7 @@ from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
 from seg_3d.data.itk_image_resample import *
+from seg_3d.utils.misc_utils import one_hot2dist
 from seg_3d.utils.slice_builder import SliceBuilder
 from utils import contour2mask, centre_crop
 
@@ -51,7 +52,7 @@ class JointTransform3D:
 
         # divide by scan max
         if self.div_by_max:
-            image = image / np.max(image)
+            image = np.asarray([im / im.max() for im in image])
 
         # get number of channels in image
         img_channels = len(image)
@@ -60,14 +61,13 @@ class JointTransform3D:
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
-        # add channel for background
         bg = np.ones_like(masks[0])
         for m in masks:
             bg[bg == m] = 0
         masks = [bg, *masks]
-
+        
         # transforming to tensor
-        image = torch.Tensor(image)
+        image = torch.Tensor(np.array(image))
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
 
         # random crop
@@ -133,7 +133,9 @@ class ImageToImage3D(Dataset):
         # useful inverse mapping which maps roi to modality
         self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
         self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask array
+
         assert len(class_labels) > 0
+
         self.patient_keys = patient_keys  # this can either be a list of strings for keys or list of ints for indices
         self.num_slices = num_slices
         self.slice_shape = slice_shape
@@ -142,6 +144,10 @@ class ImageToImage3D(Dataset):
         self.patch_size = patch_size
         self.patch_stride = patch_stride
         self.patch_halo = patch_halo
+        self.attend_samples = kwargs.get('attend_samples', False)
+        self.attend_samples_all_axes = kwargs.get('attend_samples_all_axes', False)
+        self.mask_samples = kwargs.get('mask_samples', False)
+        self.frame_dict_path = kwargs.get('attend_frame_dict_path', None)
         self.logger = logging.getLogger(__name__)
 
         if self.slice_shape is None and len(self.modality) > 1:
@@ -160,13 +166,13 @@ class ImageToImage3D(Dataset):
             with open(os.path.join(dp, "global_dict.json")) as file_obj:
                 self.dataset_dict = {**self.dataset_dict, **json.load(file_obj)}
 
-        if patient_keys is None:
+        if self.patient_keys is None:
             # if no patients specified then select all from dataset
             self.patient_keys = list(self.dataset_dict.keys())
-        elif type(patient_keys[0]) is int:
+        elif type(self.patient_keys[0]) is int:
             # if patient keys param is a list of indices get the keys from dataset
             all_patients = list(self.dataset_dict.keys())
-            self.patient_keys = [all_patients[idx] for idx in patient_keys]
+            self.patient_keys = [all_patients[idx] for idx in self.patient_keys]
 
         # sample select patients if num_patients specified
         if num_patients is not None:
@@ -179,7 +185,7 @@ class ImageToImage3D(Dataset):
 
         self.all_patient_fps = {
             patient: {
-                modality: "data/" + self.dataset_dict[patient][modality]["fp"]
+                modality: './data/' + self.dataset_dict[patient][modality]["fp"]
                 for modality in self.modality
             } for patient in self.patient_keys
         }
@@ -273,19 +279,63 @@ class ImageToImage3D(Dataset):
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)
 
-        # apply transforms and convert to tensors
-        image, mask = self.joint_transform(image, mask)
-
         if self.patch_wise and self.patch_size is not None:
             patch_idx = idx % len(self.slicer.raw_slices)
             patch_im_slice = self.slicer.raw_slices[patch_idx]
             patch_lab_slice = self.slicer.label_slices[patch_idx]
             image, mask = image[patch_im_slice], mask[patch_lab_slice]
 
+        # confirm attends logic does not remove any label information
+        if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
+            mask_sum = mask[self.class_labels.index('Tumor') - 1].sum()
+
+        # reduce the search space for finding tumor
+        if self.attend_samples:
+            depth_bounds = self.process_attend_indices_frames(mask=mask)
+            mask = mask[:, depth_bounds[0]:depth_bounds[1], ...]
+            image = image[:, depth_bounds[0]:depth_bounds[1], ...]
+
+        elif self.attend_samples_all_axes:
+            depth_bounds = self.process_attend_indices_frames(mask=mask)
+            bounds_list = [depth_bounds] + [self.process_attend_indices_spatial(mask=mask, axes=x) for x in [(0,2), (0,1)]]
+            slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
+
+            mask = mask[slices]
+            image = image[slices]
+
+        elif self.mask_samples:
+
+            depth_bounds = self.process_attend_indices_frames(mask=mask)
+            bounds_list = [depth_bounds] + [self.process_attend_indices_spatial(mask=mask, axes=x) for x in [(0,2), (0,1)]]
+            slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
+
+            mask_cp = np.zeros_like(mask)
+            image_cp = np.zeros_like(image)
+
+            mask_cp[slices] = mask[slices]
+            mask = mask_cp
+
+            image_cp[slices] = image[slices]
+            image = image_cp
+
+        if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
+            if not mask_sum == mask[self.class_labels.index('Tumor') - 1].sum():
+                self.logger.error(f'Lost label information during attend samples for patient {patient}')
+                print('original tumor sum', mask_sum)
+                print('new tumor sum', mask[self.class_labels.index('Tumor') - 1].sum())
+                exit(1)
+
+        # apply transforms and convert to tensors
+        image, mask = self.joint_transform(image, mask)
+
+        # compute distance map for boundary loss
+        dist_map = one_hot2dist(np.asarray(mask), (1, 1, 1))
+
         return {
             "orig_image": orig_image,
             "image": image.float(),
             "gt_mask": mask.float(),
+            "dist_map": dist_map,
             "patient": patient
         }
 
@@ -318,7 +368,7 @@ class ImageToImage3D(Dataset):
 
         if "Tumor" in self.roi_modality_map:
             # call helper function to process tumor mask
-            self.process_tumor_mask(mask)
+            mask = self.process_tumor_mask(mask)
         else:
             # add logic here for other combinations of rois
             pass
@@ -345,6 +395,52 @@ class ImageToImage3D(Dataset):
 
         # update tumor mask in the mask dict
         mask["Tumor"] = tumor_mask
+
+        return mask
+    
+    def process_attend_indices_spatial(self, mask, axes, padding_margin=0.1):
+        start_bound = np.inf
+        end_bound = 0
+        
+        dim_max = None
+
+        for roi in ['Bladder', 'Inter']:
+            roi_idx = self.class_labels.index(roi) - 1
+            bounds = mask[roi_idx].sum(axis=axes)
+            
+            if dim_max is None:
+                dim_max = bounds.shape[0]
+
+            bounds = np.nonzero(bounds)[0]
+            start_bound = min(bounds[0], start_bound)
+            end_bound = max(bounds[-1], end_bound)
+        
+        padding = round(dim_max * padding_margin)
+
+        start_bound = max(0, start_bound - padding)
+        end_bound = min(mask.shape[2], end_bound + padding)
+
+        return (start_bound, end_bound)
+    
+    def process_attend_indices_frames(self, mask, padding_margin=0.2, alpha=0.6):
+
+        summed_axial_mask = {}
+        
+        for roi in ['Bladder', 'Inter']:
+            roi_idx = self.class_labels.index(roi) - 1
+            bounds = mask[roi_idx].sum(axis=(1,2))
+            bounds = np.nonzero(bounds)[0]
+            summed_axial_mask[roi] = bounds
+
+        prostate, bladder = summed_axial_mask['Inter'], summed_axial_mask['Bladder']
+        dim_max = prostate.shape[0]
+        padding = round(dim_max * padding_margin)
+        start_bound = max(0, prostate[0] - padding)
+        end_bound = np.ceil(((alpha * bladder[-1]) + (1 - alpha) * prostate[-1])).astype(int)
+        end_bound = min(mask.shape[1], end_bound + padding)
+
+        return (start_bound, end_bound)
+
 
 
 class Image3D(Dataset):

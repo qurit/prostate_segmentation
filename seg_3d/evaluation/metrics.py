@@ -45,18 +45,36 @@ class MetricList:
         averaged_results = {}
 
         for key, value in self.results.items():
+            # 0th dimension are patients and 1st dimension (if it exists) are ROIs
             if type(value[0]) == torch.Tensor and value[0].is_cuda:
-                value = np.nanmean(np.asarray([x.detach().cpu().numpy() for x in value]), axis=0).tolist()
+                value = np.asarray([x.detach().cpu().numpy() for x in value])
             else:
-                value = np.nanmean(np.asarray([np.asarray(x) for x in value]), axis=0).tolist()
+                value = np.asarray([np.asarray(x) for x in value])
 
-            if type(value) is list:
-                for i in range(len(value)):
-                    averaged_results[key + '/{}'.format(self.class_labels[i])] = value[i]
+            # find mean
+            value_mean = np.nanmean(value, axis=0).tolist()
+            if type(value_mean) is list:
+                for i in range(len(value_mean)):
+                    averaged_results[key + '/{}'.format(self.class_labels[i])] = value_mean[i]
             else:
-                averaged_results[key] = value
+                averaged_results[key] = value_mean
+
+            # find min
+            if key in ["classwise_dice_score"]:
+                for i in range(len(self.class_labels)):
+                    if self.class_labels[i] in ["Bladder", "Tumor", "Inter"]:
+                        averaged_results[key + '/{}'.format(self.class_labels[i]) + "_min"] = np.nanmin(value[:, i]).item()
 
         return averaged_results
+
+
+@METRIC_REGISTRY.register()
+def mae_volume(pred, gt):
+    return [
+        abs((pred[:, i, ...].sum() - gt[:, i, ...].sum()) / gt[:, i, ...].sum())
+        for i in range(1, gt.shape[1])
+        # TODO: get proper formula for computing volume
+    ]
 
 
 @METRIC_REGISTRY.register()
@@ -68,7 +86,7 @@ def ssim(pred, gt):
 
 
 @METRIC_REGISTRY.register()
-def hausdorff(pred, gt):
+def hausdorff(pred, gt):  # TODO: this is only for bladder
     orig_shape = pred.shape
     pred = pred.cpu().argmax(axis=1)
     pred[pred != 1] = 0
@@ -92,6 +110,7 @@ def classwise_dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def argmax_dice_score(pred, gt):
+    # argmax after thresholding predictions does not make sense!
     pred = pred.cpu().numpy().argmax(axis=1)
     gt = gt.cpu().numpy()
 
@@ -121,8 +140,8 @@ def argmax_dice_score(pred, gt):
 @METRIC_REGISTRY.register()
 def overlap(pred, gt):
     # check if there are at least 3 channels
-    if pred.shape[1] < 3:
-        return np.NaN
+    if gt.shape[1] < 3:
+       return np.NaN
 
     pred = pred.cpu().numpy().argmax(axis=1)
     gt = gt.cpu().numpy()
@@ -130,6 +149,14 @@ def overlap(pred, gt):
     pred[pred != 1] = 0
 
     gt = gt[:, 2, :, :, :]
+
+    return (pred * gt).sum() / gt.sum()
+
+
+@METRIC_REGISTRY.register()
+def overlap_no_argmax(pred, gt):
+    pred = pred[:, 1, ...]
+    gt = gt[:, 2, ...]
 
     return (pred * gt).sum() / gt.sum()
 
@@ -201,6 +228,46 @@ def classwise_f1_v2(pred, gt):
     recall = (true_positives + epsilon) / (relevant + epsilon)
     f1 = (2 * (precision * recall) / (precision + recall))
     return f1[1]
+
+
+@METRIC_REGISTRY.register()
+def tumor_detection_10(pred, gt):
+    tumor_channel = 2
+
+    pred, gt = pred[:, tumor_channel, ...], gt[:, tumor_channel, ...]
+
+    dice_score = classwise_dice_score(pred, gt)
+
+    if dice_score > 0.1:
+        return 1
+    else:
+        return 0
+
+@METRIC_REGISTRY.register()
+def tumor_detection_20(pred, gt):
+    tumor_channel = 2
+
+    pred, gt = pred[:, tumor_channel, ...], gt[:, tumor_channel, ...]
+
+    dice_score = classwise_dice_score(pred, gt)
+
+    if dice_score > 0.2:
+        return 1
+    else:
+        return 0
+
+@METRIC_REGISTRY.register()
+def tumor_detection_30(pred, gt):
+    tumor_channel = 2
+
+    pred, gt = pred[:, tumor_channel, ...], gt[:, tumor_channel, ...]
+
+    dice_score = classwise_dice_score(pred, gt)
+
+    if dice_score > 0.3:
+        return 1
+    else:
+        return 0
 
 
 def get_metrics(metrics: List[str]):

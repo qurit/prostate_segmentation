@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Callable, List, Tuple
 
 import torch
@@ -55,7 +56,9 @@ class Evaluator:
                     total=len(self.dataset), desc="[evaluation progress =>]"):
                 patient = data_input["patient"][0]
                 sample = data_input["image"]  # shape is (batch, channel, depth, height, width)
-                labels = data_input["gt_mask"]
+                labels = data_input["gt_mask"].to(self.device)
+                data = {'labels': labels,
+                        'dist_map': data_input["dist_map"].to(self.device)}
 
                 val_loss = []
 
@@ -96,7 +99,7 @@ class Evaluator:
                         preds = model(sample).detach()
 
                         if self.loss:
-                            L = self.loss(preds, labels.to(self.device))
+                            L = self.loss(preds, data)   # TODO: pass dist map into kwargs 
                             if type(L) is dict:
                                 L = sum(L.values())
                             self.metric_list.results["val_loss"].append(L)
@@ -106,7 +109,7 @@ class Evaluator:
 
                     # apply thresholding if it is specified
                     if self.thresholds:
-                        preds[:] = self.threshold_predictions(preds.squeeze(1))
+                        preds[:] = self.threshold_predictions(preds.squeeze())
 
                     # make sure pred and labels have same number of channels
                     if preds.shape[1] < labels.shape[1]:
@@ -135,9 +138,12 @@ class Evaluator:
 
                     # plot mask predictions if specified
                     if self.mask_visualizer:
-                        self.mask_visualizer.plot_mask_predictions(
-                            patient, image.squeeze(0), preds.squeeze(0), labels.squeeze(0), skip_bkg=True
-                        )
+                        for plane in ['tran', 'cor', 'sag']:
+                            self.mask_visualizer.root_plot_dir = os.path.join(os.path.dirname(self.mask_visualizer.root_plot_dir), plane)
+                            self.mask_visualizer.plot_mask_predictions(
+                                patient, image.squeeze(0), preds.squeeze(0), labels.squeeze(0),
+                                skip_bkg=True, gt_overlay=False, plane=plane
+                            )
 
         model.train()
         averaged_results = (self.metric_list.get_results(average=True))
@@ -153,12 +159,14 @@ class Evaluator:
         }
 
     def threshold_predictions(self, preds: torch.Tensor) -> torch.Tensor:
-        # below approach only translates well to binary tasks
-        # TODO: improve for multi class case, maybe just argmax?
-        new_preds = [
-            torch.where(pred >= thres, torch.ones_like(pred), torch.zeros_like(pred))
-            for thres, pred in zip(self.thresholds, preds)
-        ]
+        new_preds = []
+        for thres, pred in zip(self.thresholds, preds):
+            if thres is None:
+                new_preds.append(pred)
+                continue
+            new_preds.append(
+                torch.where(pred >= thres, torch.ones_like(pred), torch.zeros_like(pred))
+            )
 
         return torch.stack(new_preds)
 

@@ -74,7 +74,7 @@ def train(model):
     logger.info("Loss:\n{}".format(loss))
 
     # init eval metrics and evaluator
-    metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.DATASET.CLASS_LABELS)
+    metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.LOSS.PARAMS.class_labels)
     evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, num_workers=cfg.NUM_WORKERS,
                           metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED, **cfg.DATASET.PARAMS)
 
@@ -373,12 +373,13 @@ def main(_config, _run):
 @ex.config
 def config():
     # # pipeline params
-    # cfg.CONFIG_FILE = 'seg_3d/output/bladder-gdl-with-overlap-128/1/config.yaml'
+    # cfg.CONFIG_FILE = 'configs_to_run/tumor-run-no-overlap-32fmaps-attend.yaml'
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     # cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 
     # # kfold
     # cfg.DATASET.FOLD = 1
+    # cfg.EVAL_ONLY = True
 
     # ## ADD MORE CONFIG CHANGES HERE ##
     # cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk

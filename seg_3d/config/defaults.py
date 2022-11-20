@@ -48,6 +48,7 @@ _C.DATASET.PARAMS.patching_label_size = None  # Tuple describing original labels
 _C.DATASET.PARAMS.attend_samples = False
 _C.DATASET.PARAMS.attend_samples_all_axes = False
 _C.DATASET.PARAMS.mask_samples = False
+_C.DATASET.PARAMS.drop_ct = False
 _C.DATASET.PARAMS.attend_frame_dict_path = ("seg_3d/data/attend_frame_range.npy")
 
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
@@ -62,6 +63,7 @@ _C.TRANSFORMS.crop = None
 _C.TRANSFORMS.p_flip = None
 _C.TRANSFORMS.div_by_max = False
 _C.TRANSFORMS.multi_scale = None
+_C.TRANSFORMS.ignore_bg = False
 
 # -----------------------------------------------------------------------------
 # LOSS

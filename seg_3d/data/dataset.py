@@ -39,6 +39,7 @@ class JointTransform3D:
         self.div_by_max = div_by_max
         self.test = test
         self.multi_scale = multi_scale  # min and max scaling factors
+        self.ignore_bg = kwargs.get('ignore_bg', False)
 
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
@@ -52,7 +53,10 @@ class JointTransform3D:
 
         # divide by scan max
         if self.div_by_max:
-            image = np.asarray([im / im.max() for im in image])
+            image = np.asarray([(im - im.min())/np.ptp(im) for im in image])
+        
+        assert (0 <= image.min() < image.max() <= 1), 'Input data is not [0,1] normalized!!'
+
 
         # get number of channels in image
         img_channels = len(image)
@@ -61,10 +65,11 @@ class JointTransform3D:
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
-        bg = np.ones_like(masks[0])
-        for m in masks:
-            bg[bg == m] = 0
-        masks = [bg, *masks]
+        if not self.ignore_bg:
+            bg = np.ones_like(masks[0])
+            for m in masks:
+                bg[bg == m] = 0
+            masks = [bg, *masks]
         
         # transforming to tensor
         image = torch.Tensor(np.array(image))
@@ -147,6 +152,7 @@ class ImageToImage3D(Dataset):
         self.attend_samples = kwargs.get('attend_samples', False)
         self.attend_samples_all_axes = kwargs.get('attend_samples_all_axes', False)
         self.mask_samples = kwargs.get('mask_samples', False)
+        self.drop_ct = kwargs.get('drop_ct', False)
         self.frame_dict_path = kwargs.get('attend_frame_dict_path', None)
         self.logger = logging.getLogger(__name__)
 
@@ -324,6 +330,11 @@ class ImageToImage3D(Dataset):
                 print('original tumor sum', mask_sum)
                 print('new tumor sum', mask[self.class_labels.index('Tumor') - 1].sum())
                 exit(1)
+        
+        if self.drop_ct:
+            image = [image[0]]
+            # inter_idx = self.class_labels.index('Inter') - 1
+            # mask = np.delete(mask, inter_idx, 0)
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)

@@ -193,7 +193,9 @@ class BCEDiceLoss(nn.Module):
                 class_weight_log = ["{} - {:.4f}, ".format(*i) for i in self.class_weight]
 
             self.logger.info(("Dice: " + "{}" * len(dice_log)).format(*dice_log))
-            self.logger.info(("Class weights: " + "{}" * len(class_weight_log)).format(*class_weight_log))
+
+            if self.class_balanced:
+                self.logger.info(("Class weights: " + "{}" * len(class_weight_log)).format(*class_weight_log))
         
         return {
             "dice": self.dice_weight * dice_loss.sum(),

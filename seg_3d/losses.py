@@ -185,11 +185,15 @@ class BCEDiceLoss(nn.Module):
         if dice_loss.shape:
             if self.class_labels is not None:
                 dice_labels_tuple = [i for i in zip(self.class_labels, dice_verbose)]
+                class_weight_labels_tuple = [i for i in zip(self.class_labels, self.class_weight)]
                 dice_log = ["{} - {:.4f}, ".format(*i) for i in dice_labels_tuple]
+                class_weight_log = ["{} - {:.4f}, ".format(*i) for i in class_weight_labels_tuple]
             else:
                 dice_log = ["{:.4f}, ".format(i) for i in dice_verbose]
+                class_weight_log = ["{} - {:.4f}, ".format(*i) for i in self.class_weight]
 
             self.logger.info(("Dice: " + "{}" * len(dice_log)).format(*dice_log))
+            self.logger.info(("Class weights: " + "{}" * len(class_weight_log)).format(*class_weight_log))
         
         return {
             "dice": self.dice_weight * dice_loss.sum(),

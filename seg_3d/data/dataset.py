@@ -333,8 +333,8 @@ class ImageToImage3D(Dataset):
         
         if self.drop_ct:
             image = [image[0]]
-            # inter_idx = self.class_labels.index('Inter') - 1
-            # mask = np.delete(mask, inter_idx, 0)
+            inter_idx = self.class_labels.index('Inter') - 1  # TODO: param here or extra logic for when we need to comment out?? (I already forget why...)
+            mask = np.delete(mask, inter_idx, 0)
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
@@ -453,7 +453,6 @@ class ImageToImage3D(Dataset):
         return (start_bound, end_bound)
 
 
-
 class Image3D(Dataset):
     """
     Dataset class purely for inference TODO: test me
@@ -487,3 +486,41 @@ class Image3D(Dataset):
         image = convert_image_to_npy(image)
 
         return self.transform(image)
+
+
+def custom_collate_fn(data):
+    img_sizes = [item['image'].shape for item in data]
+    # pad each sample in batch so they are the same size
+    new_sample_shape = [max([item[i] for item in img_sizes]) for i in [1,2,3]]
+
+    new_data = {}
+    # do the easy items first
+    new_data['orig_image'] = torch.stack([torch.Tensor(item['orig_image']) for item in data], dim=0)
+    new_data['patient'] = [item['patient'] for item in data]
+    for k in ['image', 'gt_mask', 'dist_map']:
+        new_vals = []
+        for sample in data:
+            val = torch.Tensor(sample[k])
+            c, d, h, w = val.shape
+            if d < new_sample_shape[0]:
+                val = torch.cat([val, torch.zeros((c, new_sample_shape[0] - d, h, w))], dim=1)
+
+            if h < new_sample_shape[1]:
+                val = torch.cat([val, torch.zeros((c, val.size(1), new_sample_shape[1] - h, w))], dim=2)
+
+            if w < new_sample_shape[2]:
+                val = torch.cat([val, torch.zeros((c, val.size(1), val.size(2), new_sample_shape[2] - w))], dim=3)
+
+            new_vals.append(val)
+
+        new_data[k] = torch.stack(new_vals, dim=0)
+
+    return new_data
+
+
+def get_collate_fn(dataset: ImageToImage3D, batch_size: int):
+    if dataset.attend_samples or dataset.attend_samples_all_axes:
+        if batch_size > 1:
+            return custom_collate_fn
+    else:
+        return None # default for torch dataloader

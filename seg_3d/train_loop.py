@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 
 import seg_3d
 from seg_3d.config import get_cfg
-from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
+from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D, get_collate_fn
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
@@ -113,6 +113,7 @@ def train(model):
                     range(start_iter, max_iter),
                     DataLoader(
                         train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH,
+                        collate_fn=get_collate_fn(train_dataset, cfg.SOLVER.IMS_PER_BATCH),
                         num_workers=cfg.NUM_WORKERS, worker_init_fn=random.seed(cfg.seed),
                         sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.seed))
             ):

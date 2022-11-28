@@ -3,9 +3,11 @@ services:
 
   mongo:
     env_file: .env
-    image: rdesc/mongo  # set to mongo for original image
+    image: mongo  # set to mongo for original image
     ports:
       - 127.0.0.1:27017:27017
+    volumes:
+      - /home/rodrigue/Shared/results_database/:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: $MONGO_INITDB_ROOT_USERNAME
       MONGO_INITDB_ROOT_PASSWORD: $MONGO_INITDB_ROOT_PASSWORD

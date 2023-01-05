@@ -122,6 +122,7 @@ def train(model):
 
                 # extract data from item recieved from data loader
                 patients = batched_inputs["patient"]
+                logger.info(('Patients ' + '{}, ' * len(patients)).format(*patients))
                 orig_imgs = batched_inputs["orig_image"]
                 sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)

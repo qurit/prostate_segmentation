@@ -329,8 +329,8 @@ def main(_config, _run):
         eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
-                                      num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
-                                      patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
+                                      num_patients=cfg.DATASET.TEST_NUM_PATIENTS,
+                                      patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
                                       joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)
@@ -375,9 +375,9 @@ def main(_config, _run):
 @ex.config
 def config():
     # # pipeline params
-    # cfg.CONFIG_FILE = 'configs_to_run/tumor-run-no-overlap-32fmaps-attend.yaml'
-    # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
-    # cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
+    cfg.CONFIG_FILE = '/data/home/rodrigue/prostate-segmentation/seg_3d/output/zto_run2/SNMMI--bare-multi-mod-bkg-prostate-bladder.yaml'
+    cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+    cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 
     # # kfold
     # cfg.DATASET.FOLD = 1

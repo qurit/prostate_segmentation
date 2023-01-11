@@ -17,7 +17,7 @@ ex = Experiment()
 
 
 @ex.main
-def main(metrics, thresholds, _run):
+def main(metrics, thresholds, load_inference_fp, _run):
     name = _run.experiment_info['name']
     root_dir = os.path.join('seg_3d/output', name)
     add_fh(logger, output=root_dir)
@@ -26,23 +26,24 @@ def main(metrics, thresholds, _run):
     inference_dict = {}
     results = []
     metric_list = None
-    class_labels = None
 
     for d in os.listdir(root_dir):
         run_dir = os.path.join(root_dir, d)
         if not os.path.isdir(run_dir):
             continue
 
-        with open(os.path.join(run_dir, 'inference.pk'), "rb") as f:
+        fold_config = yaml.safe_load(open(os.path.join(run_dir, 'config.yaml'), 'r'))
+        class_labels = fold_config['DATASET']['CLASS_LABELS']
+
+        with open(os.path.join(run_dir, load_inference_fp), "rb") as f:
             inference_dict = {**inference_dict, **pickle.load(f, encoding="bytes")}
             # os.remove(os.path.join(run_dir, 'inference.pk'))
 
         if metric_list is None:
-            class_labels = yaml.safe_load(open(os.path.join(run_dir, 'config.yaml'), 'r'))['DATASET']['CLASS_LABELS']
             metric_list = MetricList(metrics=get_metrics(metrics), class_labels=class_labels)
 
         for idx, patient in enumerate(inference_dict):
-            gt  = inference_dict[patient]['gt']
+            gt = inference_dict[patient]['gt']
             preds = inference_dict[patient]['preds']
 
             if thresholds:
@@ -58,7 +59,15 @@ def main(metrics, thresholds, _run):
             for key in patient_metrics:
                 logger.info("{}: {}".format(key, patient_metrics[key]))
             patient_metrics['patient'] = patient
+
+            # convert lists to separate key, value pair
+            for k, v in patient_metrics:
+                if len(list(v)) > 1:
+                    for jdx, item in enumerate(v):
+                        patient_metrics[key + '/{}'.format(class_labels[jdx])] = item
+
             results.append(patient_metrics)
+            print(patient_metrics)
 
     averaged_results = metric_list.get_results(average=True)
     logger.info('Inference done! Mean metric scores:')
@@ -68,15 +77,15 @@ def main(metrics, thresholds, _run):
         ex.log_scalar(k, float(v))
 
     # save inference results
-    # with open(os.path.join(root_dir, 'inference.pk'), 'wb') as f:
-    #     pickle.dump(inference_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(os.path.join(root_dir, 'inference.pk'), 'wb') as f:
+        pickle.dump(inference_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # save metrics to a .txt file
-    with open(os.path.join(root_dir, 'averaged_metrics.txt'), 'w') as f:
+    with open(os.path.join(root_dir, 'averaged_metrics.txt'), 'w') as f:  # TODO save stats instead like min, max, mean, median, std
         json.dump(averaged_results, f, indent=4)
     
     df = pd.DataFrame(results)
-    # TODO: need to split the dice scores between ROIs
+    print(df)
     df.to_csv(os.path.join(root_dir, 'metrics.csv'), index=False)
 
 
@@ -84,9 +93,11 @@ def main(metrics, thresholds, _run):
 def config():
     metrics = [
         'classwise_dice_score',
+        'argmax_dice_score'
     ]
-    thresholds = [0.5, 0.5]
+    thresholds = None
     tags = ['kfold_eval']
+    load_inference_fp = 'eval_0/inference.pk'
 
 
 if __name__ == '__main__':

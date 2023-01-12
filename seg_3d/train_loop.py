@@ -254,8 +254,9 @@ def train(model):
 @ex.main
 def main(_config, _run):
     if "LOAD_ONLY_CFG_FILE" in _config and _config["LOAD_ONLY_CFG_FILE"]:
+        cfg.merge_from_other_cfg(CN(_config))
         # next two lines are for when config file is specified in cmdline
-        cfg.merge_from_file(CN(_config).CONFIG_FILE)
+        cfg.merge_from_file(CN(_config).CONFIG_FILE)  # any param inside config file will be overwritten here
         cfg.OUTPUT_DIR = None
 
     else:
@@ -375,9 +376,9 @@ def main(_config, _run):
 @ex.config
 def config():
     # # pipeline params
-    cfg.CONFIG_FILE = '/data/home/rodrigue/prostate-segmentation/seg_3d/output/zto_run2/SNMMI--bare-multi-mod-bkg-prostate-bladder.yaml'
-    cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
-    cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
+    # cfg.CONFIG_FILE = '/data/home/rodrigue/prostate-segmentation/seg_3d/output/zto_run2/SNMMI--bare-multi-mod-bkg-prostate-bladder.yaml'
+    # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+    # cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 
     # # kfold
     # cfg.DATASET.FOLD = 1

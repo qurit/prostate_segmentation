@@ -31,4 +31,4 @@ do
 done
 
 echo "Final evaluation for $CFG..."
-python -m seg_3d.evaluation.aggregate_preds -n $NAME
+python -m seg_3d.evaluation.aggregate_preds -n $NAME with "load_inference_fp='eval_0/inference.pk'"

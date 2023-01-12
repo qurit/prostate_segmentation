@@ -77,6 +77,8 @@ def main(metrics, thresholds, load_inference_fp, _run):
             results.append(patient_metrics)
             inference_dict = {**inference_dict, **curr_inference}
 
+        metric_list.reset()  # initialize for next iteration
+
     df = pd.DataFrame(results)
     df.index = df['patient']
 

@@ -376,7 +376,7 @@ def main(_config, _run):
 @ex.config
 def config():
     # # pipeline params
-    # cfg.CONFIG_FILE = '/data/home/rodrigue/prostate-segmentation/seg_3d/output/zto_run2/SNMMI--bare-multi-mod-bkg-prostate-bladder.yaml'
+    # cfg.CONFIG_FILE = 'configs_to_run/tumor-run-no-overlap-32fmaps-attend.yaml'
     # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     # cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
 

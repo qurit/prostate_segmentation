@@ -254,8 +254,9 @@ def train(model):
 @ex.main
 def main(_config, _run):
     if "LOAD_ONLY_CFG_FILE" in _config and _config["LOAD_ONLY_CFG_FILE"]:
+        cfg.merge_from_other_cfg(CN(_config))
         # next two lines are for when config file is specified in cmdline
-        cfg.merge_from_file(CN(_config).CONFIG_FILE)
+        cfg.merge_from_file(CN(_config).CONFIG_FILE)  # any param inside config file will be overwritten here
         cfg.OUTPUT_DIR = None
 
     else:
@@ -329,8 +330,8 @@ def main(_config, _run):
         eval_transforms = JointTransform3D(test=True, **cfg.TRANSFORMS)
         # get dataset for evaluation
         test_dataset = ImageToImage3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH,
-                                      num_patients=cfg.DATASET.VAL_NUM_PATIENTS,
-                                      patient_keys=cfg.DATASET.VAL_PATIENT_KEYS,
+                                      num_patients=cfg.DATASET.TEST_NUM_PATIENTS,
+                                      patient_keys=cfg.DATASET.TEST_PATIENT_KEYS,
                                       class_labels=cfg.DATASET.CLASS_LABELS,
                                       joint_transform=eval_transforms,
                                       **cfg.DATASET.PARAMS)

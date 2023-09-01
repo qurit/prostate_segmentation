@@ -42,7 +42,7 @@ To load existing data, first choose the right volume in **docker/volumes** and t
 
 ## Tensorboard
 
-We also use [Tensorboard](https://www.tensorflow.org/tensorboard) to visualize the inputs and outputs of the model during train time. It is especially useful to visually monitor the evolution of model predictions and to also confirm data augmentations look reasonable (e.g. elastic deformations stability very sensitive to parameter settings). To bring up the Tensorboard dashboard, run the following command, where `output-dir`` is the path to the directory storing the training runs
+We also use [Tensorboard](https://www.tensorflow.org/tensorboard) to visualize the inputs and outputs of the model during train time. It is especially useful to visually monitor the evolution of model predictions and to also confirm data augmentations look reasonable (e.g. elastic deformations stability very sensitive to parameter settings). To bring up the Tensorboard dashboard, run the following command, where `output-dir` is the path to the directory storing the training runs:
 ```bash
 tensorboard --logdir ouput-dir
 ```

@@ -57,10 +57,11 @@ if __name__ == '__main__':
     Run demo via:
     `python -m seg_3d.evaluation.visualize_preds`
     """
-    for p in ['tran', 'sag', 'cor']:  # TODO
-        visualize_preds(inference_fp="seg_3d/output/dummy_for_plots/inference.pk",
-                        class_labels=["Prostate", "Bladder", "Tumor", "TURP urethra", "R seminal", "L seminal"],
-                        crop_size=(128,128),
+    for p in ['tran', 'sag', 'cor']:
+        visualize_preds(# some items in the pickle file may have been stored while being on the gpu
+                        inference_fp="seg_3d/output/FINAL_PET_bladder_model/1/inference.pk",
+                        class_labels=["Bladder", "Tumor"],
+                        crop_size=(128, 128),
                         save_figs=True,
                         plane=p
                         )

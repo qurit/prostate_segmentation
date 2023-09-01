@@ -24,9 +24,10 @@ _C.DATASET = CN()
 _C.DATASET.PARAMS = CN(new_allowed=True)
 
 _C.DATASET.FOLD = None  # kfold split index
+_C.DATASET.DATA_SPLIT = "seg_3d/data/data_split_3fold.json"
 
 _C.DATASET.TRAIN_DATASET_PATH = ("data/image_dataset",)
-_C.DATASET.TEST_DATASET_PATH = ("data/test_dataset",)
+_C.DATASET.TEST_DATASET_PATH = ("data/image_dataset",)
 
 _C.DATASET.TRAIN_NUM_PATIENTS = None
 _C.DATASET.VAL_NUM_PATIENTS = None
@@ -36,21 +37,7 @@ _C.DATASET.TRAIN_PATIENT_KEYS = None
 _C.DATASET.VAL_PATIENT_KEYS = None
 _C.DATASET.TEST_PATIENT_KEYS = None
 
-_C.DATASET.PARAMS.modality_roi_map = [{"CT": ["Bladder"]}]
-_C.DATASET.PARAMS.num_slices = None  # number of slices in axial plane, if None then selects shortest scan length from dataset
-_C.DATASET.PARAMS.crop_size = None  # size of centre crop, if None then no centre cropping done
-
-_C.DATASET.PARAMS.patch_size = None  # 3 dim tuple for patch size
-_C.DATASET.PARAMS.patch_stride = None  # 3 dim tuple for patch stride (how far to move between patches)
-_C.DATASET.PARAMS.patch_halo = None  # 3 dim tuple for size of halo to be removed from patches
-_C.DATASET.PARAMS.patching_input_size = None  # Tuple describing original image input size before patching
-_C.DATASET.PARAMS.patching_label_size = None  # Tuple describing original labels/mask size before patching
-_C.DATASET.PARAMS.attend_samples = False
-_C.DATASET.PARAMS.attend_samples_all_axes = False
-_C.DATASET.PARAMS.mask_samples = False
-_C.DATASET.PARAMS.drop_ct = False
-_C.DATASET.PARAMS.attend_frame_dict_path = ("seg_3d/data/attend_frame_range.npy")
-
+_C.DATASET.PARAMS.modality_roi_map = [{"PT": ["Bladder"]}]
 _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 
 # -----------------------------------------------------------------------------
@@ -58,20 +45,13 @@ _C.DATASET.CLASS_LABELS = ["Background", "Bladder"]
 # -----------------------------------------------------------------------------
 _C.TRANSFORMS = CN(new_allowed=True)
 
-_C.TRANSFORMS.deform_sigma = None
-_C.TRANSFORMS.crop = None
-_C.TRANSFORMS.p_flip = None
-_C.TRANSFORMS.div_by_max = False
-_C.TRANSFORMS.multi_scale = None
-_C.TRANSFORMS.ignore_bg = False
-
 # -----------------------------------------------------------------------------
 # LOSS
 # -----------------------------------------------------------------------------
 _C.LOSS = CN()
 _C.LOSS.PARAMS = CN(new_allowed=True)
 
-_C.LOSS.FN = "DiceLoss"  # available loss functions are inside losses.py
+_C.LOSS.FN = "BCEDiceLoss"  # available loss functions are inside losses.py
 
 # -----------------------------------------------------------------------------
 # SOLVER
@@ -98,7 +78,7 @@ _C.EARLY_STOPPING = CN()
 
 _C.EARLY_STOPPING.PATIENCE = 0  # set to 0 to disable
 _C.EARLY_STOPPING.MONITOR = "val_loss"
-_C.EARLY_STOPPING.MODE = "min"
+_C.EARLY_STOPPING.MODE = "min"  # options are 'max' and 'min' for either maximizing or minimizing early stopping metric
 
 # -----------------------------------------------------------------------------
 # EVAL
@@ -127,7 +107,7 @@ _C.PRED_ONLY = False  # Option to only run inference on data specified by _C.DAT
 # -----------------------------------------------------------------------------
 # MISC
 # -----------------------------------------------------------------------------
-_C.NUM_WORKERS = 6  # number of workers for the data loaders
-_C.OUTPUT_DIR = None
-_C.CONFIG_FILE = None
+_C.NUM_WORKERS = 0  # number of workers for the data loaders, 0 means only the main process will load batches
+_C.OUTPUT_DIR = None  # the output directory to store models, results, predictions, etc. for a training/evaluation run
+_C.CONFIG_FILE = None  # file path to a config to load parameters from
 _C.AMP_ENABLED = True  # enables automatic mixed precision training

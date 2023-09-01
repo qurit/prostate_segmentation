@@ -11,14 +11,23 @@ from torch.utils.data import DataLoader
 from seg_3d.data.dataset import ImageToImage3D
 from seg_3d.evaluation.mask_visualizer import MaskVisualizer
 from seg_3d.evaluation.metrics import MetricList
-from seg_3d.utils.slice_builder import SliceBuilder
 
 
 class Evaluator:
     def __init__(self, device: str, dataset: ImageToImage3D, metric_list: MetricList, loss: Callable = None,
-                 thresholds: List[float] = None, amp_enabled: bool = False, num_workers: int = 0,
-                 patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None, patch_halo: Tuple[int] = None,
-                 patching_input_size: Tuple[int] = None, patching_label_size: Tuple[int] = None, **kwargs):
+                 thresholds: List[float] = None, amp_enabled: bool = False, num_workers: int = 0):
+        """
+        Class for evaluating a model.
+
+        Args:
+            device: the cpu or gpu device on which to load tensors
+            dataset: an instance of ImageToImage3D for loading samples from dataset
+            metric_list: an instance of MetricList to specify list of metrics to compute
+            loss: optional arg for tracking validation loss
+            thresholds: optional arg to threshold continuous valued predictions
+            amp_enabled: whether not we are in AMP mode
+            num_workers: can distribute evaluation across multiple workers
+        """
         self.device = device
         self.dataset = dataset
         self.metric_list = metric_list
@@ -28,19 +37,6 @@ class Evaluator:
         self.num_workers = num_workers
         self.mask_visualizer = None
         self.logger = logging.getLogger(__name__)
-
-        self.patch_size = patch_size
-        self.patch_stride = patch_stride
-        self.patch_halo = patch_halo
-        self.patch_input_size = patching_input_size
-        self.patch_label_size = patching_label_size
-
-        if self.patch_size is not None:
-            dummy_img = torch.ones(self.patch_input_size)
-            dummy_msk = torch.ones(self.patch_label_size)
-            self.slicer = SliceBuilder([dummy_img], [dummy_msk], self.patch_size, self.patch_stride, None)
-        else:
-            self.slicer = None
 
     def evaluate(self, model):
         self.logger.info("Starting evaluation on dataset of size {}...".format(len(self.dataset)))
@@ -57,55 +53,21 @@ class Evaluator:
                 patient = data_input["patient"][0]
                 sample = data_input["image"]  # shape is (batch, channel, depth, height, width)
                 labels = data_input["gt_mask"].to(self.device)
-                data = {'labels': labels,
-                        'dist_map': data_input["dist_map"].to(self.device)}
-
-                val_loss = []
+                data = {"labels": labels,
+                        "dist_map": data_input["dist_map"].to(self.device)}
 
                 # runs the forward pass with autocasting if enabled
                 with autocast(enabled=self.amp_enabled):
+                    preds = model(sample).detach()
 
-                    if self.slicer is not None:
+                    if self.loss:
+                        L = self.loss(preds, data)
+                        if type(L) is dict:
+                            L = sum(L.values())
+                        self.metric_list.results["val_loss"].append(L)
 
-                        preds = torch.zeros_like(labels).to(self.device)
-                        norms = torch.zeros_like(labels).to(self.device)
-
-                        for i in range(len(self.slicer.raw_slices)):
-                            X, y = sample.squeeze(0)[self.slicer.raw_slices[i]], labels.squeeze(0)[self.slicer.label_slices[i]]
-                            X, y = X.unsqueeze(0).to(self.device), y.unsqueeze(0).to(self.device)
-
-                            y_hat = model(X).detach()
-                            y_act = model.final_activation(y_hat)
-
-                            u_prediction, u_index = self.slicer.remove_halo(y_act.squeeze(), self.slicer.raw_slices[i],
-                                                                            sample.shape[2:], self.patch_halo)
-
-                            u_index = (slice(0, 1, None), slice(0, 2, None)) + u_index[1:]
-
-                            preds[u_index] += u_prediction
-                            norms[u_index] += 1
-
-                            if self.loss:
-                                L = self.loss(y_hat, y)
-                                if type(L) is dict:
-                                    L = sum(L.values())
-                                val_loss.append(L)
-
-                        if self.loss:
-                            val_loss = torch.stack(val_loss)
-                            self.metric_list.results["val_loss"].append(torch.mean(val_loss).item())
-
-                    else:
-                        preds = model(sample).detach()
-
-                        if self.loss:
-                            L = self.loss(preds, data)   # TODO: pass dist map into kwargs 
-                            if type(L) is dict:
-                                L = sum(L.values())
-                            self.metric_list.results["val_loss"].append(L)
-
-                        # apply final activation on preds
-                        preds = model.final_activation(preds)
+                    # apply final activation on preds
+                    preds = model.final_activation(preds)
 
                     # apply thresholding if it is specified
                     if self.thresholds:
@@ -130,15 +92,17 @@ class Evaluator:
                     labels = labels.cpu().numpy()
                     preds = preds.cpu().numpy()
                     image = data_input["image"].cpu().numpy()
+                    orig_image = data_input["orig_image"].cpu().numpy()
 
                     inference_dict[patient] = {"gt": labels,
                                                "preds": preds,
                                                "image": image,
+                                               "orig_image": orig_image,
                                                "metrics": patient_metrics}
 
                     # plot mask predictions if specified
                     if self.mask_visualizer:
-                        for plane in ['tran', 'cor', 'sag']:
+                        for plane in ["tra", "cor", "sag"]:
                             self.mask_visualizer.root_plot_dir = os.path.join(os.path.dirname(self.mask_visualizer.root_plot_dir), plane)
                             self.mask_visualizer.plot_mask_predictions(
                                 patient, image.squeeze(0), preds.squeeze(0), labels.squeeze(0),

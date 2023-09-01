@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 
 import seg_3d
 from seg_3d.config import get_cfg
-from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D, get_collate_fn
+from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
@@ -29,11 +29,19 @@ from seg_3d.utils.early_stopping import EarlyStopping
 from seg_3d.utils.events import CommonMetricPrinter, JSONWriter, TensorboardXWriter, EventStorage
 from seg_3d.utils.logger import setup_logger, add_fh
 from seg_3d.utils.scheduler import build_lr_scheduler
-from seg_3d.utils.misc_utils import seed_all, TrainingSampler, plot_loss
+from seg_3d.utils.misc_utils import seed_all, TrainingSampler
 from seg_3d.utils.tb_formatter import DefaultTensorboardFormatter
 
-SETTINGS.CONFIG.READ_ONLY_CONFIG = False  # allows us to update config based on run name
-ex = Experiment()
+SETTINGS.CONFIG.READ_ONLY_CONFIG = False  # allows us to update config based on run name (hacky)
+ex = Experiment()  # initialize Sacred experiment https://sacred.readthedocs.io/
+
+# global vars
+ROOT_OUTPUT_DIR = "seg_3d/output"            # root directory for all runs
+ROOT_MASK_DIR = "masks/"                     # root directory to store figures for prediction masks
+MODEL_BEST_FILE_NAME = "model_best.pth"      # best model file
+CONFIG_FILE_NAME = "config.yaml"             # stores all the parameters for a run
+BEST_METRICS_FILE_NAME = "best_metrics.txt"  # stores the metrics of the best model
+METRICS_WRITER_FILE_NAME = "metrics.json"    # stores metrics computed during each training/eval step
 
 
 def train(model):
@@ -48,7 +56,7 @@ def train(model):
                                    class_labels=cfg.DATASET.CLASS_LABELS,
                                    **cfg.DATASET.PARAMS)
 
-    # if no patient keys specified for val then pass in the patients keys from excluded set in train
+    # if no patient keys specified for val then pass in the patients keys from excluded set in train (hacky)
     if cfg.DATASET.VAL_PATIENT_KEYS is None:
         cfg.DATASET.defrost()
         cfg.DATASET.VAL_PATIENT_KEYS = train_dataset.excluded_patients
@@ -76,7 +84,7 @@ def train(model):
     # init eval metrics and evaluator
     metric_list = MetricList(metrics=get_metrics(cfg.TEST.EVAL_METRICS), class_labels=cfg.LOSS.PARAMS.class_labels)
     evaluator = Evaluator(device=cfg.MODEL.DEVICE, loss=loss, dataset=val_dataset, num_workers=cfg.NUM_WORKERS,
-                          metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED, **cfg.DATASET.PARAMS)
+                          metric_list=metric_list, amp_enabled=cfg.AMP_ENABLED)
 
     # init checkpointers
     checkpointer = Checkpointer(model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler)
@@ -87,10 +95,12 @@ def train(model):
     # init writers which periodically output/save metric scores
     # window_size gives option to do median smoothing of metrics
     writers = [CommonMetricPrinter(max_iter, window_size=1),
-               JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json"), window_size=1),
+               JSONWriter(os.path.join(cfg.OUTPUT_DIR, METRICS_WRITER_FILE_NAME), window_size=1),
                TensorboardXWriter(cfg.OUTPUT_DIR, window_size=1)]
 
     # init tensorboard formatter for images
+    # tensorboard is used to visualize predictions during training steps
+    # https://www.tensorflow.org/tensorboard
     tensorboard_img_formatter = DefaultTensorboardFormatter()
 
     # init early stopping
@@ -113,7 +123,6 @@ def train(model):
                     range(start_iter, max_iter),
                     DataLoader(
                         train_dataset, batch_size=cfg.SOLVER.IMS_PER_BATCH,
-                        collate_fn=get_collate_fn(train_dataset, cfg.SOLVER.IMS_PER_BATCH),
                         num_workers=cfg.NUM_WORKERS, worker_init_fn=random.seed(cfg.seed),
                         sampler=TrainingSampler(size=len(train_dataset), shuffle=True, seed=cfg.seed))
             ):
@@ -127,7 +136,7 @@ def train(model):
                 sample = batched_inputs["image"].to(cfg.MODEL.DEVICE)
                 labels = batched_inputs["gt_mask"].to(cfg.MODEL.DEVICE)
                 data = {'labels': labels,
-                        'dist_map': batched_inputs["dist_map"].to(cfg.MODEL.DEVICE)}
+                        'dist_map': batched_inputs["dist_map"].to(cfg.MODEL.DEVICE)}  # dist map is an input to boundary loss
 
                 optimizer.zero_grad()
 
@@ -139,6 +148,7 @@ def train(model):
 
                     # check if need to process masks and images to be visualized in tensorboard
                     for idx, p in enumerate(patients):
+                        # hardcoded, only visualize 4 patients from train set
                         if p in train_dataset.patient_keys[:4]:
                             for name, batch in zip(["img_orig", "img_aug", "mask_gt", "mask_pred"],
                                                    [orig_imgs, sample, labels, preds]):
@@ -168,6 +178,7 @@ def train(model):
                            "lr": optimizer.param_groups[0]["lr"],
                            **loss_dict}
                 for k, v in scalars.items():
+                    # a bit redundant, but scalars are stored in 2 places: Sacred and EventStorage
                     storage.put_scalar(k, v, smoothing_hint=False)
                     ex.log_scalar(k, float(v), step=iteration)
 
@@ -189,14 +200,13 @@ def train(model):
                             with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
                                 pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
                         # save best metrics to a .txt file
-                        with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
+                        with open(os.path.join(cfg.OUTPUT_DIR, BEST_METRICS_FILE_NAME), "w") as f:
                             json.dump(results["metrics"], f, indent=4)
 
                     elif early_stopping.triggered:
                         break
 
                 # print out info about iteration
-                # if iteration - start_iter > 5 and ((iteration + 1) % 20 == 0 or iteration == max_iter - 1):
                 for writer in writers:
                     writer.write()
                 # images have been written to tensorboard file so clear them from memory
@@ -208,23 +218,15 @@ def train(model):
             train_time = time() - train_start
             logger.info("Completed training in %.0f s (%.2f h)" % (train_time, train_time / 3600))
 
-            # plot loss curve
-            path = os.path.join(cfg.OUTPUT_DIR, "model_loss.png")
-            try:
-                plot_loss(path, storage)
-                logger.info("Saved model loss figure at {}".format(path))
-            except KeyError:
-                logger.info("Not enough metric information to plot loss, skipping...")
-
             # run final evaluation with best model
-            model_checkpoint = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
+            model_checkpoint = os.path.join(cfg.OUTPUT_DIR, MODEL_BEST_FILE_NAME)
 
             if cfg.TEST.FINAL_EVAL_METRICS and model_checkpoint in checkpointer.get_all_checkpoint_files():
                 logger.info("Running final evaluation with best model...")
                 evaluator.thresholds = cfg.TEST.THRESHOLDS
 
                 # add weight file to db
-                ex.add_artifact(os.path.join(cfg.OUTPUT_DIR, "model_best.pth"), content_type="weights")
+                ex.add_artifact(os.path.join(cfg.OUTPUT_DIR, MODEL_BEST_FILE_NAME), content_type="weights")
                 # load best model
                 checkpointer.load(model_checkpoint, checkpointables=["model"])
 
@@ -234,7 +236,7 @@ def train(model):
                 # configure mask visualizer if specified
                 if cfg.TEST.VIS_PREDS:
                     evaluator.set_mask_visualizer(
-                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")  # skip label for bgd
+                        cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, ROOT_MASK_DIR)  # skip label for bgd
                     )
 
                 # run evaluation
@@ -242,12 +244,12 @@ def train(model):
                 for k, v in results["metrics"].items():
                     ex.log_scalar(k, float(v), step=iteration)
 
-                # save inference results
+                # save inference results (can be a large file)
                 if cfg.TEST.INFERENCE_FILE_NAME:
                     with open(os.path.join(cfg.OUTPUT_DIR, cfg.TEST.INFERENCE_FILE_NAME), "wb") as f:
                         pickle.dump(results["inference"], f, protocol=pickle.HIGHEST_PROTOCOL)
                 # save best metrics to a .txt file
-                with open(os.path.join(cfg.OUTPUT_DIR, "best_metrics.txt"), "w") as f:
+                with open(os.path.join(cfg.OUTPUT_DIR, BEST_METRICS_FILE_NAME), "w") as f:
                     json.dump(results["metrics"], f, indent=4)
 
 
@@ -263,20 +265,25 @@ def main(_config, _run):
         cfg.merge_from_other_cfg(CN(_config))  # this merges the param changes done in cmd line
 
     name = _run.experiment_info["name"]
-    base_dir = os.path.join("seg_3d/output", name)
+    base_dir = os.path.join(ROOT_OUTPUT_DIR, name)
 
     # make training deterministic
     seed_all(cfg.seed)
 
     if cfg.DATASET.FOLD is not None:
         base_dir = os.path.join(base_dir, str(cfg.DATASET.FOLD))
-        cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
-        cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
-        cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
+        data_split = json.load(open(cfg.DATASET.DATA_SPLIT, "r"))
+        if cfg.DATASET.TRAIN_PATIENT_KEYS is None:
+            cfg.DATASET.TRAIN_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["train"]["keys"]
+        if cfg.DATASET.VAL_PATIENT_KEYS is None:
+            cfg.DATASET.VAL_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["val"]["keys"]
+        if cfg.DATASET.TEST_PATIENT_KEYS is None:
+            cfg.DATASET.TEST_PATIENT_KEYS = data_split[str(cfg.DATASET.FOLD)]["test"]["keys"]
 
     if any([cfg.EVAL_ONLY, cfg.PRED_ONLY, cfg.RESUME]) and not cfg.MODEL.WEIGHTS:
         # get model weight file if not specified
-        cfg.MODEL.WEIGHTS = os.path.join(base_dir, "model_best.pth")
+        cfg.MODEL.WEIGHTS = os.path.join(base_dir, MODEL_BEST_FILE_NAME)
+        print(os.path.join(base_dir, MODEL_BEST_FILE_NAME))
         assert os.path.isfile(cfg.MODEL.WEIGHTS)
 
     if cfg.OUTPUT_DIR is None:
@@ -292,7 +299,7 @@ def main(_config, _run):
             cfg.OUTPUT_DIR = base_dir
 
     cfg.freeze()  # freeze all parameters i.e. no more changes can be made to config
-    # make sure latest version of config is saved to mongo db
+    # make sure latest version of config is saved to mongo db (hacky)
     if ex.observers != 0 and ex.observers[0].run_entry is not None:
         ex.observers[0].run_entry["config"] = cfg
 
@@ -303,7 +310,7 @@ def main(_config, _run):
 
     # create directory to store output files
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-    cfg_path = os.path.join(cfg.OUTPUT_DIR, "config.yaml")
+    cfg_path = os.path.join(cfg.OUTPUT_DIR, CONFIG_FILE_NAME)
 
     # check if file already exists
     if os.path.isfile(cfg_path):
@@ -344,7 +351,7 @@ def main(_config, _run):
         # configure mask visualizer if specified
         if cfg.TEST.VIS_PREDS:
             evaluator.set_mask_visualizer(
-                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, "masks/")
+                cfg.DATASET.CLASS_LABELS[1:], os.path.join(cfg.OUTPUT_DIR, ROOT_MASK_DIR)
             )
 
         results = evaluator.evaluate(model)
@@ -359,6 +366,10 @@ def main(_config, _run):
 
     elif cfg.PRED_ONLY:  # TODO
         logger.info("Running inference only!")
+
+        return NotImplementedError
+
+        # load model
         Checkpointer(model, save_dir=cfg.OUTPUT_DIR).load(cfg.MODEL.WEIGHTS, checkpointables=["model"])
 
         # get dataset for inference
@@ -368,50 +379,48 @@ def main(_config, _run):
 
         # save results
 
-        return NotImplementedError
-
     return train(model)
 
 
 @ex.config
 def config():
-    # # pipeline params
-    # cfg.CONFIG_FILE = 'configs_to_run/tumor-run-no-overlap-32fmaps-attend.yaml'
-    # cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
-    # cfg.OUTPUT_DIR = None  # this makes sure output dir is specified by experiment name
-
-    # # kfold
-    # cfg.DATASET.FOLD = 1
-    # cfg.EVAL_ONLY = True
-
-    # ## ADD MORE CONFIG CHANGES HERE ##
-    # cfg.TEST.INFERENCE_FILE_NAME = 'inference.pk'  # this enables saving eval predictions to disk
-    # cfg.TEST.VIS_PREDS = True  # this runs the mask visualizer code at the end of training
-    # # cfg.DATASET.TEST_PATIENT_KEYS = ['JGH01', 'JGH02', 'JGH03', 'JGH04', 'JGH05']
+    # pipeline params
 
     # ###########################################
+    # option to load config file here
+    # cfg.CONFIG_FILE = "seg_3d/config/prostate-config.yaml"
+    # cfg.merge_from_file(cfg.CONFIG_FILE)
+
+    ## can add more config changes here ##
+
+    # ###########################################
+
+    # by default, set the output directory name based on the specified experiment name via `--name` or `-n` in cmd line
+    cfg.OUTPUT_DIR = None
+
     # add to sacred experiment
     ex.add_config(cfg)  # NOTE: for run_configs.sh script everything above in config() should be commented out!!
 
     # sacred params
     seed = 99  # comment this out to disable deterministic experiments
-    # tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
-    # tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
+    # next two params are useful for sorting through runs with Sacred
+    tags = [i for i in cfg.DATASET.CLASS_LABELS if i != "Background"]  # add ROIs as tags
+    tags.extend([list(i.keys())[0] for i in cfg.DATASET.PARAMS.modality_roi_map])  # add modalities as tags
 
 
 if __name__ == '__main__':
     cfg = get_cfg()  # config global variable
-    data_split = json.load(open("seg_3d/data/data_split.json", "r"))
     logger_list = [
-        setup_logger(name="fvcore"),
+        setup_logger(name="fvcore"),  # fvcore is a light-weight core library from facebook
         setup_logger(name=seg_3d.__name__)
     ]
     logger = logging.getLogger(seg_3d.__name__ + "." + __name__)
 
-    # mongo observer
+    # mongo observer - the recommendeded way of storing run information from Sacred
+    # to ignore oberservers use flag -u, useful for some quick tests or debugging runs
     ex.observers.append(
         MongoObserver(url=f'mongodb://'
-                          'sample:password'
+                          'sample:password'  # credentials are set in .env file
                           # f'{os.environ["MONGO_INITDB_ROOT_USERNAME"]}:'
                           # f'{os.environ["MONGO_INITDB_ROOT_PASSWORD"]}'
                           f'@localhost:27017/?authMechanism=SCRAM-SHA-1', db_name='db')

@@ -13,9 +13,13 @@ from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
 from seg_3d.data.itk_image_resample import *
-from seg_3d.utils.misc_utils import one_hot2dist
-from seg_3d.utils.slice_builder import SliceBuilder
-from utils import contour2mask, centre_crop
+from seg_3d.utils.misc_utils import one_hot2dist, centre_crop
+from dicom_code.contour_utils import contour2mask
+
+
+# global vars
+CONTOUR_DATA_DICT_FILE = 'global_dict.json'
+ROOT_DATA_DIR = './data/'
 
 
 class JointTransform3D:
@@ -26,20 +30,24 @@ class JointTransform3D:
     be used, which will take care of the problems above.
 
     Args:
-        crop: tuple describing the size of the random crop. If bool(crop) evaluates to False, no crop will
-            be taken.
-        p_flip: float, the probability of performing a random horizontal flip.
+        test: set to True if in test mode which disables some of the augmentations and randomness
+        crop_size: tuple describing the size of the random crop. If bool(crop_size) evaluates to False, no crop will be taken.
+        p_flip: the probability of performing a random horizontal flip.
+        deform_sigma: sigma parameter used for elastic deformation
+        deform_points: points parameter used for elastic deformation
+        multi_scale: min and max scaling factors for random scaling, e.g. multi_scale=(0.85,1.15)
+        ignore_bg: if True, then no mask is generated for the background class
     """
 
-    def __init__(self, test: bool = False, crop: Tuple = None, p_flip: float = None, deform_sigma: float = None,
-                 deform_points: Tuple or int = (3, 3, 3), div_by_max: bool = True, multi_scale: Tuple = None,
-                 **kwargs):
-        self.crop = crop
-        self.p_flip = p_flip
-        self.div_by_max = div_by_max
+    def __init__(self, test: bool = False, crop_size: Tuple = None, p_flip: float = None, deform_sigma: float = None,
+                 deform_points: Tuple or int = (3, 3, 3), min_max_norm: bool = True, multi_scale: Tuple = None,
+                 ignore_bg: bool = False):
         self.test = test
-        self.multi_scale = multi_scale  # min and max scaling factors
-        self.ignore_bg = kwargs.get('ignore_bg', False)
+        self.crop_size = crop_size
+        self.p_flip = p_flip
+        self.min_max_norm = min_max_norm
+        self.multi_scale = multi_scale
+        self.ignore_bg = ignore_bg
 
         if deform_sigma and not self.test:
             self.deform = lambda x, y: \
@@ -51,12 +59,11 @@ class JointTransform3D:
 
     def __call__(self, image: np.ndarray, masks: np.ndarray) -> Tuple[torch.tensor, torch.tensor]:
 
-        # divide by scan max
-        if self.div_by_max:
-            image = np.asarray([(im - im.min())/np.ptp(im) for im in image])
-        
-        assert (0 <= image.min() < image.max() <= 1), 'Input data is not [0,1] normalized!!'
-
+        # normalization
+        # feature scaling https://en.wikipedia.org/wiki/Feature_scaling
+        if self.min_max_norm:
+            image = np.asarray([(im - im.min()) / np.ptp(im) for im in image])  # dividing by max - min is bad if it equals 0...
+            assert (0 <= image.min() < image.max() <= 1), 'Input data is not [0,1] normalized!!'
 
         # get number of channels in image
         img_channels = len(image)
@@ -65,18 +72,19 @@ class JointTransform3D:
         sample_data = self.deform(image, masks)
         image, masks = sample_data[0:img_channels], sample_data[img_channels:]
 
+        # this step needs to happen after elastic deformation
         if not self.ignore_bg:
             bg = np.ones_like(masks[0])
             for m in masks:
                 bg[bg == m] = 0
-            masks = [bg, *masks]
+            masks = [bg, *masks]  # the first entry in masks is background
         
         # transforming to tensor
         image = torch.Tensor(np.array(image))
         mask = torch.Tensor(np.stack(masks, axis=0).astype(int))
 
         # random crop
-        if self.crop:
+        if self.crop_size:
             if not self.test:
 
                 if self.multi_scale is not None:
@@ -85,10 +93,10 @@ class JointTransform3D:
                     new_shape = (scale_factor * np.asarray(orig_shape)).astype(int).tolist()
                     image, mask = T.Resize(new_shape)(image), T.Resize(new_shape, interpolation=0)(mask)
 
-                i, j, h, w = T.RandomCrop.get_params(image, self.crop)
+                i, j, h, w = T.RandomCrop.get_params(image, self.crop_size)
                 image, mask = F.crop(image, i, j, h, w), F.crop(mask, i, j, h, w)
             else:
-                image, mask = T.CenterCrop(self.crop[0])(image), T.CenterCrop(self.crop[0])(mask)
+                image, mask = T.CenterCrop(self.crop_size[0])(image), T.CenterCrop(self.crop_size[0])(mask)
 
         if self.p_flip and not self.test and np.random.rand() < self.p_flip:
             image, mask = F.hflip(image), F.hflip(mask)
@@ -98,7 +106,9 @@ class JointTransform3D:
 
 class ImageToImage3D(Dataset):
     """
-    Reads the dataset dict and applies the augmentations on images and masks.
+    Custom Dataset class for pytorch pipeline. Assumes dataset is formatted in custom format
+    and is stored inside REPO_ROOT_DIR/data/
+
     Usage:
         1. If used without the unet.model.Model wrapper, an instance of this object should be passed to
            torch.utils.data.DataLoader. Iterating through this returns the tuple of image, mask and image
@@ -109,7 +119,7 @@ class ImageToImage3D(Dataset):
     Args:
         dataset_path: path to the dataset. Structure of the dataset should be:
             dataset_path
-              |-- global_dict.json
+              |-- global_dict.json  // contains metadata and contour data for the scans of each patient
               |-- patient001
                   |-- CT
                       |-- 1.dcm
@@ -120,45 +130,44 @@ class ImageToImage3D(Dataset):
                       |-- 2.dcm
                       |-- ...
               |-- ...
+        modality_roi_map: a dict for each modality to specify the ROIs and modalities to extract from dataset
+            e.g. modality_roi_map=[{'PT': ['Bladder', 'Tumor']}]
+        class_labels: specifies which ROIs to include in the final mask Tensor as well as the ordering
+            e.g. class_labels=['Background', 'Bladder', 'Tumor']
+        num_slices: number of axial slices to include
+        slice_shape: the dimensions to configure an axial slice, needed for multi-modality training!
+        crop_size: tuple describing the size of the initial crop
+        clamp_ct: tuple describing the lower and upper bounds for image clamping of CT scan
+        joint_transform: an instance of JointTransform3D for data augmentations. If bool(joint_transform)
+            evaluates to False, torchvision.transforms.ToTensor will be used on both image and mask.
         modality: specifies modality of scan
         rois: list of region of interests
-        patient_keys: optional arg to specify patients, if None then use all patients from dataset
-        joint_transform: augmentation transform, an instance of JointTransform3D. If bool(joint_transform)
-            evaluates to False, torchvision.transforms.ToTensor will be used on both image and mask.
+        patient_keys: specifies patients to include either by index or patient ID, if patient_keys=None
+            then all patients from dataset are loaded
+        num_patients: specifies the number of patients to include, sampled randomly
     """
 
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
-                 num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
-                 joint_transform: Callable = None, patient_keys: List[str] or List[int] = None, num_patients: int = None,
-                 patch_size: Tuple[int] = None, patch_stride: Tuple[int] = None,
-                 patch_halo: Tuple[int] = None, **kwargs) -> None:
+                 num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None, clamp_ct: Tuple[int] = (-150, 150),
+                 joint_transform: Callable = None, patient_keys: List[str] or List[int] = None, num_patients: int = None):
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
         # useful inverse mapping which maps roi to modality
         self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
-        self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask array
-
+        self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask tensor
         assert len(class_labels) > 0
-
         self.patient_keys = patient_keys  # this can either be a list of strings for keys or list of ints for indices
         self.num_slices = num_slices
         self.slice_shape = slice_shape
         self.crop_size = crop_size
-        self.num_patients = num_patients  # used for train-val-test split
-        self.patch_size = patch_size
-        self.patch_stride = patch_stride
-        self.patch_halo = patch_halo
-        self.attend_samples = kwargs.get('attend_samples', False)
-        self.attend_samples_all_axes = kwargs.get('attend_samples_all_axes', False)
-        self.mask_samples = kwargs.get('mask_samples', False)
-        self.drop_ct = kwargs.get('drop_ct', False)
-        self.frame_dict_path = kwargs.get('attend_frame_dict_path', None)
+        self.clamp_ct = clamp_ct
+        self.num_patients = num_patients  # can be used for train-val-test split
         self.logger = logging.getLogger(__name__)
 
         if self.slice_shape is None and len(self.modality) > 1:
-            self.logger.warning("Doing multi channel but 'slice_shape' is set to None! "
-                                "Use 'slice_shape' to specify a common resolution across modalities")
+            self.logger.warning('Doing multi channel but "slice_shape" is set to None! '
+                                'Use "slice_shape" to specify a common resolution across modalities')
 
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
@@ -169,7 +178,7 @@ class ImageToImage3D(Dataset):
 
         # handle case if multiple dataset paths passed
         for dp in self.dataset_path:
-            with open(os.path.join(dp, "global_dict.json")) as file_obj:
+            with open(os.path.join(dp, CONTOUR_DATA_DICT_FILE)) as file_obj:
                 self.dataset_dict = {**self.dataset_dict, **json.load(file_obj)}
 
         if self.patient_keys is None:
@@ -191,40 +200,25 @@ class ImageToImage3D(Dataset):
 
         self.all_patient_fps = {
             patient: {
-                modality: './data/' + self.dataset_dict[patient][modality]["fp"]
+                modality: ROOT_DATA_DIR + self.dataset_dict[patient][modality]['fp']
                 for modality in self.modality
             } for patient in self.patient_keys
         }
 
         if joint_transform is None:
-            joint_transform = JointTransform3D(crop=None, p_flip=0, deform_sigma=None, div_by_max=False)
+            joint_transform = JointTransform3D(crop_size=None, p_flip=0, deform_sigma=None, min_max_norm=False)
         self.joint_transform = joint_transform
 
-        # if dataset is used during evaluation/testing then disable patch-wise during data fetching
-        self.patch_wise = not self.joint_transform.test
-
-        if self.patch_wise and self.patch_size is not None:
-            dummy_img = torch.ones((1, self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1]))
-            dummy_msk = torch.ones(
-                (len(self.class_labels), self.num_slices, self.joint_transform.crop[0], self.joint_transform.crop[1])
-            )
-            self.slicer = SliceBuilder([dummy_img], [dummy_msk], self.patch_size, self.patch_stride, None)
-        else:
-            self.slicer = None
+    def get_patient_by_name(self, name) -> dict:
+        for idx, item in enumerate(self.patient_keys):
+            if item == name:
+                return self[idx]
 
     def __len__(self) -> int:
-        if self.patch_wise and self.patch_size is not None:
-            return len(self.patient_keys) * len(self.slicer.raw_slices)
-        else:
             return len(self.patient_keys)
 
     def __getitem__(self, idx) -> dict:
-        # divide index by number of patches to get patient idx
-        if self.patch_wise and self.patch_size is not None:
-            patient = list(self.patient_keys)[idx // len(self.slicer.raw_slices)]
-        else:
-            patient = list(self.patient_keys)[idx]
-
+        patient = list(self.patient_keys)[idx]
         patient_dir = self.all_patient_fps[patient]
 
         # read image
@@ -235,19 +229,23 @@ class ImageToImage3D(Dataset):
         # get the raw image size for each modality
         raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modality}
 
-        # TODO: get SUV values from PET
-        if "CT" in self.modality:
-            image_dict["CT"] = clamp_image_values(image=image_dict["CT"], lower_bound=-150, upper_bound=150)
+        # preprocessing of CT
+        if 'CT' in self.modality and bool(self.clamp_ct):
+            image_dict['CT'] = clamp_image_values(image=image_dict['CT'], lower_bound=self.clamp_ct[0], upper_bound=self.clamp_ct[1])
+
+        # preprocessing of PET
+        if 'PT' in self.modality:
+            pass
 
         # read mask data from dataset and return mask dict
         mask_dict_npy = self.get_mask(patient, raw_image_size_dict)
 
         # perform resampling if multi channel/modality is specified
-        if {*self.modality} == {"PT", "CT"} and self.slice_shape is not None:
+        if {*self.modality} == {'PT', 'CT'} and self.slice_shape is not None:
             reference_size = [*self.slice_shape,
-                              raw_image_size_dict["CT"][0]]  # assumes PET and CT have same image spacing in z direction
-            image = combine_pet_ct_image(pet_image=image_dict["PT"],
-                                         ct_image=downsample_image(image_dict["CT"], reference_size))
+                              raw_image_size_dict['CT'][0]]  # assumes PET and CT have same image spacing in z direction
+            image = combine_pet_ct_image(pet_image=image_dict['PT'],
+                                         ct_image=downsample_image(image_dict['CT'], reference_size), verbose=False)
 
             mask_dict = {
                 roi: mask_to_sitk_image(mask_dict_npy[roi], image_dict[self.roi_modality_map[roi]])
@@ -278,63 +276,12 @@ class ImageToImage3D(Dataset):
         # need to have same tensor shape across samples in batch
         image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
 
-        if self.crop_size is not None:
-            image = centre_crop(image, (*image.shape[:2], *self.crop_size))
-            mask = centre_crop(mask, (*mask.shape[:2], *self.crop_size))
-
         # keep copy of image before further image preprocessing
         orig_image = np.copy(image)
 
-        if self.patch_wise and self.patch_size is not None:
-            patch_idx = idx % len(self.slicer.raw_slices)
-            patch_im_slice = self.slicer.raw_slices[patch_idx]
-            patch_lab_slice = self.slicer.label_slices[patch_idx]
-            image, mask = image[patch_im_slice], mask[patch_lab_slice]
-
-        # confirm attends logic does not remove any label information
-        if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
-            mask_sum = mask[self.class_labels.index('Tumor') - 1].sum()
-
-        # reduce the search space for finding tumor
-        if self.attend_samples:
-            depth_bounds = self.process_attend_indices_frames(mask=mask)
-            mask = mask[:, depth_bounds[0]:depth_bounds[1], ...]
-            image = image[:, depth_bounds[0]:depth_bounds[1], ...]
-
-        elif self.attend_samples_all_axes:
-            depth_bounds = self.process_attend_indices_frames(mask=mask)
-            bounds_list = [depth_bounds] + [self.process_attend_indices_spatial(mask=mask, axes=x) for x in [(0,2), (0,1)]]
-            slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
-
-            mask = mask[slices]
-            image = image[slices]
-
-        elif self.mask_samples:
-
-            depth_bounds = self.process_attend_indices_frames(mask=mask)
-            bounds_list = [depth_bounds] + [self.process_attend_indices_spatial(mask=mask, axes=x) for x in [(0,2), (0,1)]]
-            slices = tuple([slice(None)] + [slice(*i) for i in bounds_list])
-
-            mask_cp = np.zeros_like(mask)
-            image_cp = np.zeros_like(image)
-
-            mask_cp[slices] = mask[slices]
-            mask = mask_cp
-
-            image_cp[slices] = image[slices]
-            image = image_cp
-
-        if self.attend_samples or self.attend_samples_all_axes or self.mask_samples:
-            if not mask_sum == mask[self.class_labels.index('Tumor') - 1].sum():
-                self.logger.error(f'Lost label information during attend samples for patient {patient}')
-                print('original tumor sum', mask_sum)
-                print('new tumor sum', mask[self.class_labels.index('Tumor') - 1].sum())
-                exit(1)
-        
-        if self.drop_ct:
-            image = [image[0]]
-            inter_idx = self.class_labels.index('Inter') - 1  # TODO: param here or extra logic for when we need to comment out?? (I already forget why...)
-            mask = np.delete(mask, inter_idx, 0)
+        if self.crop_size is not None:
+            image = centre_crop(image, (*image.shape[:2], *self.crop_size))
+            mask = centre_crop(mask, (*mask.shape[:2], *self.crop_size))
 
         # apply transforms and convert to tensors
         image, mask = self.joint_transform(image, mask)
@@ -343,17 +290,17 @@ class ImageToImage3D(Dataset):
         dist_map = one_hot2dist(np.asarray(mask), (1, 1, 1))
 
         return {
-            "orig_image": orig_image,
-            "image": image.float(),
-            "gt_mask": mask.float(),
-            "dist_map": dist_map,
-            "patient": patient
+            'orig_image': orig_image,
+            'image': image.float(),
+            'gt_mask': mask.float(),
+            'dist_map': dist_map,  # used for boundary loss
+            'patient': patient  # patient id
         }
 
     def get_mask(self, patient: str, image_size_dict: Dict[str, Tuple]) -> dict:
         # get all rois from the dataset
         patient_rois = {
-            modality: list(self.dataset_dict[patient][modality]["rois"].keys()) for modality in self.modality
+            modality: list(self.dataset_dict[patient][modality]['rois'].keys()) for modality in self.modality
         }
 
         # get specified roi data from dataset
@@ -361,10 +308,10 @@ class ImageToImage3D(Dataset):
         for roi_name, modality in self.roi_modality_map.items():
             # check to see if specified rois exist in dataset
             if roi_name in patient_rois[modality]:
-                roi_data[(roi_name, modality)] = self.dataset_dict[patient][modality]["rois"][roi_name]
+                roi_data[(roi_name, modality)] = self.dataset_dict[patient][modality]['rois'][roi_name]
             else:
                 # add empty mask if specified roi does not exist in dataset
-                # self.logger.warning("Roi '{}' does not exist in dataset for patient '{}'! Adding empty mask..."
+                # self.logger.warning('Roi "{}" does not exist in dataset for patient "{}"! Adding empty mask...'
                 #                    .format(roi_name, patient))
                 # creates an empty list of contours for each frame
                 roi_data[(roi_name, modality)] = [[] for _ in range(image_size_dict[modality][0])]
@@ -377,7 +324,7 @@ class ImageToImage3D(Dataset):
             ) for roi_name, modality in roi_data
         }
 
-        if "Tumor" in self.roi_modality_map:
+        if 'Tumor' in self.roi_modality_map:
             # call helper function to process tumor mask
             mask = self.process_tumor_mask(mask)
         else:
@@ -386,79 +333,47 @@ class ImageToImage3D(Dataset):
 
         # return properly ordered mask based on class labels (while ignoring background)
         return OrderedDict({
-            roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != "Background"
+            roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != 'Background'
         })
 
     def process_tumor_mask(self, mask: Dict[str, np.ndarray]) -> None:
-        tumor_keys = [x for x in mask if "Tumor" in x]
-        tumor_mask = np.zeros_like(mask["Tumor"])
+        """
+        Merges all the tumor masks into a single class called 'Tumor'
+        Some patients may have 'Tumor', 'Tumor2', and 'Tumor3'
+        """
+        tumor_keys = [x for x in mask if 'Tumor' in x]
+        tumor_mask = np.zeros_like(mask['Tumor'])
 
         # merge Tumor rois into a single channel
         for tum in tumor_keys:
             tumor_mask += mask[tum]
-            if tum != "Tumor":
+            if tum != 'Tumor':
                 del mask[tum]
 
         tumor_mask[tumor_mask > 1] = 1
 
-        if "Bladder" in self.roi_modality_map:
-            mask["Bladder"][tumor_mask == 1] = 0  # ensure there is no overlap in gt bladder mask
+        if 'Bladder' in self.roi_modality_map:
+            mask['Bladder'][tumor_mask == 1] = 0  # ensure there is no overlap in gt bladder mask
 
         # update tumor mask in the mask dict
-        mask["Tumor"] = tumor_mask
+        mask['Tumor'] = tumor_mask
 
         return mask
-    
-    def process_attend_indices_spatial(self, mask, axes, padding_margin=0.1):
-        start_bound = np.inf
-        end_bound = 0
-        
-        dim_max = None
-
-        for roi in ['Bladder', 'Inter']:
-            roi_idx = self.class_labels.index(roi) - 1
-            bounds = mask[roi_idx].sum(axis=axes)
-            
-            if dim_max is None:
-                dim_max = bounds.shape[0]
-
-            bounds = np.nonzero(bounds)[0]
-            start_bound = min(bounds[0], start_bound)
-            end_bound = max(bounds[-1], end_bound)
-        
-        padding = round(dim_max * padding_margin)
-
-        start_bound = max(0, start_bound - padding)
-        end_bound = min(mask.shape[2], end_bound + padding)
-
-        return (start_bound, end_bound)
-    
-    def process_attend_indices_frames(self, mask, padding_margin=0.2, alpha=0.6):
-
-        summed_axial_mask = {}
-        
-        for roi in ['Bladder', 'Inter']:
-            roi_idx = self.class_labels.index(roi) - 1
-            bounds = mask[roi_idx].sum(axis=(1,2))
-            bounds = np.nonzero(bounds)[0]
-            summed_axial_mask[roi] = bounds
-
-        prostate, bladder = summed_axial_mask['Inter'], summed_axial_mask['Bladder']
-        dim_max = prostate.shape[0]
-        padding = round(dim_max * padding_margin)
-        start_bound = max(0, prostate[0] - padding)
-        end_bound = np.ceil(((alpha * bladder[-1]) + (1 - alpha) * prostate[-1])).astype(int)
-        end_bound = min(mask.shape[1], end_bound + padding)
-
-        return (start_bound, end_bound)
 
 
 class Image3D(Dataset):
     """
-    Dataset class purely for inference TODO: test me
+    Dataset class purely for inference
+
+    TODO: this is NOT implemented! Needs the preprocessing (e.g. resampling 
+    for multi modality, centre crop, etc.) of data minus label handling
+
+    nice to haves:
+     - option to run inference on a particular patient specified by id
+     - returns prediction as a RTSTRUCT
     """
 
-    def __init__(self, dataset_path: str or List[str], path_suffix: str = "", transform: Callable = None,
+    def __init__(self, dataset_path: str or List[str], path_suffix: str = '', transform: Callable = None,
                  **kwargs) -> None:
         if type(dataset_path) is str:
             self.dataset_path = [dataset_path]
@@ -468,7 +383,7 @@ class Image3D(Dataset):
         # get all the subdirectories containing scans
         self.scan_fps = [
             os.path.join(scan_path, path_suffix) for dp in self.dataset_path
-            for scan_path in glob.glob(os.path.join(dp, "/*/"))
+            for scan_path in glob.glob(os.path.join(dp, '/*/'))
         ]
 
         self.transform = transform or torch.Tensor
@@ -486,41 +401,3 @@ class Image3D(Dataset):
         image = convert_image_to_npy(image)
 
         return self.transform(image)
-
-
-def custom_collate_fn(data):
-    img_sizes = [item['image'].shape for item in data]
-    # pad each sample in batch so they are the same size
-    new_sample_shape = [max([item[i] for item in img_sizes]) for i in [1,2,3]]
-
-    new_data = {}
-    # do the easy items first
-    new_data['orig_image'] = torch.stack([torch.Tensor(item['orig_image']) for item in data], dim=0)
-    new_data['patient'] = [item['patient'] for item in data]
-    for k in ['image', 'gt_mask', 'dist_map']:
-        new_vals = []
-        for sample in data:
-            val = torch.Tensor(sample[k])
-            c, d, h, w = val.shape
-            if d < new_sample_shape[0]:
-                val = torch.cat([val, torch.zeros((c, new_sample_shape[0] - d, h, w))], dim=1)
-
-            if h < new_sample_shape[1]:
-                val = torch.cat([val, torch.zeros((c, val.size(1), new_sample_shape[1] - h, w))], dim=2)
-
-            if w < new_sample_shape[2]:
-                val = torch.cat([val, torch.zeros((c, val.size(1), val.size(2), new_sample_shape[2] - w))], dim=3)
-
-            new_vals.append(val)
-
-        new_data[k] = torch.stack(new_vals, dim=0)
-
-    return new_data
-
-
-def get_collate_fn(dataset: ImageToImage3D, batch_size: int):
-    if dataset.attend_samples or dataset.attend_samples_all_axes:
-        if batch_size > 1:
-            return custom_collate_fn
-    else:
-        return None # default for torch dataloader

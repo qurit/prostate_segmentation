@@ -1,15 +1,17 @@
 #!/bin/bash
 
-# usage: ./run_configs.sh dir_path
+# usage: ./scripts/run_configs.sh dir_path
 
 # where dir_path is a directory storing
 # all the config yamls for the runs
 
 # assumes the configs are properly configured
-# along with train_loop.py
+# along with train_loop.py i.e. only line
+# needed inside config() is `ex.add_config(cfg)`
 
 DIR=$1;
 COUNT=0;
+
 for CFG in `ls $DIR/*.yaml`
 do 
   echo "$COUNT: Running config $CFG...";

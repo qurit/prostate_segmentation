@@ -4,23 +4,23 @@ from typing import Callable, List, Dict
 import numpy as np
 import torch
 from fvcore.common.registry import Registry
-from sklearn.metrics import jaccard_score, f1_score
 from skimage.metrics import structural_similarity, hausdorff_distance
 
 from seg_3d.losses import compute_per_channel_dice
 
+
+# nice way of keeping a 'record' of all the metrics, makes it easy to reference metrics inside a config yaml file
 METRIC_REGISTRY = Registry('METRIC')
 EPSILON = 1e-32
 
 
 class MetricList:
-    """
-    Groups together metrics computed during evaluation for easy processing
-    """
     def __init__(self, metrics: Dict[str, Callable], class_labels: List[str]):
         """
+        Groups together metrics computed during evaluation for easy processing
+
         Args:
-            metrics: key is the name of the metric and value is the metric method that takes in two arguments
+            metrics: key is the name of the metric and value is the metric method that takes in two arguments (pred, gt)
             class_labels: labels for the classes, used to distinguish metric scores for different classes
         """
         assert isinstance(metrics, dict), '\'metrics\' must be a dictionary of callables'
@@ -59,22 +59,17 @@ class MetricList:
             else:
                 averaged_results[key] = value_mean
 
-            # find min
+            # hardcoding...
             if key in ["classwise_dice_score"]:
                 for i in range(len(self.class_labels)):
                     if self.class_labels[i] in ["Bladder", "Tumor", "Inter"]:
                         averaged_results[key + '/{}'.format(self.class_labels[i]) + "_min"] = np.nanmin(value[:, i]).item()
 
+                for i in range(len(self.class_labels)):
+                    if self.class_labels[i] in ["Bladder", "Tumor", "Inter"]:
+                        averaged_results[key + '/{}'.format(self.class_labels[i]) + "_std"] = np.std(value[:, i]).item()
+
         return averaged_results
-
-
-@METRIC_REGISTRY.register()
-def mae_volume(pred, gt):
-    return [
-        abs((pred[:, i, ...].sum() - gt[:, i, ...].sum()) / gt[:, i, ...].sum())
-        for i in range(1, gt.shape[1])
-        # TODO: get proper formula for computing volume
-    ]
 
 
 @METRIC_REGISTRY.register()
@@ -86,20 +81,16 @@ def ssim(pred, gt):
 
 
 @METRIC_REGISTRY.register()
-def hausdorff(pred, gt):  # TODO: this is only for bladder
-    orig_shape = pred.shape
-    pred = pred.cpu().argmax(axis=1)
-    pred[pred != 1] = 0
-    im1 = pred.numpy().squeeze()
-#    pred = torch.nn.functional.one_hot(pred).view(*orig_shape)
-    im2 = gt.squeeze().cpu().numpy()[1]
-
-    return hausdorff_distance(im1, im2)
+def hausdorff(pred, gt): 
+    return [
+        hausdorff_distance(im1, im2)
+        for im1, im2 in zip(pred.squeeze().cpu().numpy(), gt.squeeze().cpu().numpy())
+    ]
 
 
 @METRIC_REGISTRY.register()
 def dice_score(pred, gt):
-    return (pred[gt == 1]).sum() * 2.0 / (pred.sum() + gt.sum())
+    return (2.0 * (pred * gt).sum()) / (pred.sum() + gt.sum())
 
 
 @METRIC_REGISTRY.register()
@@ -110,7 +101,7 @@ def classwise_dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def argmax_dice_score(pred, gt):
-    # argmax after thresholding predictions does not make sense!
+    # NOTE: argmax after thresholding predictions does not make sense!
     pred = pred.cpu().numpy().argmax(axis=1)
     gt = gt.cpu().numpy()
 
@@ -139,6 +130,7 @@ def argmax_dice_score(pred, gt):
 
 @METRIC_REGISTRY.register()
 def overlap(pred, gt):
+    """Computes the overlap between predicted bladder and ground truth tumor"""
     # check if there are at least 3 channels
     if gt.shape[1] < 3:
        return np.NaN
@@ -146,128 +138,18 @@ def overlap(pred, gt):
     pred = pred.cpu().numpy().argmax(axis=1)
     gt = gt.cpu().numpy()
 
-    pred[pred != 1] = 0
-
-    gt = gt[:, 2, :, :, :]
+    pred[pred != 1] = 0  # hardcoded, get only predictions for bladder
+    gt = gt[:, 2, :, :, :] # hardcoded, get only ground truth for tumor
 
     return (pred * gt).sum() / gt.sum()
 
 
 @METRIC_REGISTRY.register()
 def overlap_no_argmax(pred, gt):
-    pred = pred[:, 1, ...]
-    gt = gt[:, 2, ...]
+    pred = pred[:, 1, ...]  # hardcoded
+    gt = gt[:, 2, ...]  # hardcoded
 
     return (pred * gt).sum() / gt.sum()
-
-
-@METRIC_REGISTRY.register()
-def iou(pred, gt):
-    return jaccard_score(gt.flatten(), pred.flatten().round())
-
-
-@METRIC_REGISTRY.register()
-def classwise_iou(pred, gt):
-    """
-    Args:
-        pred: torch.Tensor of shape (n_batch, n_classes, image.shape)
-        gt: torch.LongTensor of shape (n_batch, image.shape)
-    """
-
-    dims = (0, *range(2, len(pred.shape)))
-    gt = gt.squeeze(1).long()
-    gt = torch.zeros_like(pred).scatter_(1, gt[:, None, :], 1)
-    intersection = pred * gt
-    union = pred + gt - intersection
-    return (intersection.sum(dim=dims).float() + EPSILON) / (union.sum(dim=dims) + EPSILON)
-
-
-@METRIC_REGISTRY.register()
-def f1(pred, gt):
-    return f1_score(gt.flatten(), pred.flatten().round())
-
-
-@METRIC_REGISTRY.register()
-def classwise_f1(pred, gt):
-    """
-    Args:
-        pred: torch.Tensor of shape (n_batch, n_classes, image.shape)
-        gt: torch.LongTensor of shape (n_batch, image.shape)
-    """
-    gt = gt.long().squeeze(1)
-    epsilon = 1e-20
-    n_classes = pred.shape[1]
-
-    pred = torch.argmax(pred, dim=1)
-    true_positives = torch.tensor([((pred == i) * (gt == i)).sum() for i in range(n_classes)]).float()
-    selected = torch.tensor([(pred == i).sum() for i in range(n_classes)]).float()
-    relevant = torch.tensor([(gt == i).sum() for i in range(n_classes)]).float()
-
-    precision = (true_positives + epsilon) / (selected + epsilon)
-    recall = (true_positives + epsilon) / (relevant + epsilon)
-    return (2 * (precision * recall) / (precision + recall))
-
-
-@METRIC_REGISTRY.register()
-def classwise_f1_v2(pred, gt):
-    """
-    Args:
-        pred: torch.Tensor of shape (n_batch, n_classes, image.shape)
-        gt: torch.LongTensor of shape (n_batch, image.shape)
-    """
-    gt = gt.long().squeeze(1)
-    epsilon = 1e-20
-    n_classes = pred.shape[1]
-
-    pred = torch.argmax(pred, dim=1)
-    true_positives = torch.tensor([((pred == i) * (gt == i)).sum() for i in range(n_classes)]).float()
-    selected = torch.tensor([(pred == i).sum() for i in range(n_classes)]).float()
-    relevant = torch.tensor([(gt == i).sum() for i in range(n_classes)]).float()
-
-    precision = (true_positives + epsilon) / (selected + epsilon)
-    recall = (true_positives + epsilon) / (relevant + epsilon)
-    f1 = (2 * (precision * recall) / (precision + recall))
-    return f1[1]
-
-
-@METRIC_REGISTRY.register()
-def tumor_detection_10(pred, gt):
-    tumor_channel = 2
-
-    pred, gt = pred[:, tumor_channel, ...].unsqueeze(1), gt[:, tumor_channel, ...].unsqueeze(1)
-
-    dice_score = classwise_dice_score(pred, gt)
-
-    if dice_score[0] > 0.1:
-        return 1
-    else:
-        return 0
-
-@METRIC_REGISTRY.register()
-def tumor_detection_20(pred, gt):
-    tumor_channel = 2
-
-    pred, gt = pred[:, tumor_channel, ...].unsqueeze(1), gt[:, tumor_channel, ...].unsqueeze(1)
-
-    dice_score = classwise_dice_score(pred, gt)
-
-    if dice_score[0] > 0.2:
-        return 1
-    else:
-        return 0
-
-@METRIC_REGISTRY.register()
-def tumor_detection_30(pred, gt):
-    tumor_channel = 2
-
-    pred, gt = pred[:, tumor_channel, ...].unsqueeze(1), gt[:, tumor_channel, ...].unsqueeze(1)
-
-    dice_score = classwise_dice_score(pred, gt)
-
-    if dice_score[0] > 0.3:
-        return 1
-    else:
-        return 0
 
 
 def get_metrics(metrics: List[str]):

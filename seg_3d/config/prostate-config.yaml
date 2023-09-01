@@ -1,22 +1,23 @@
-_BASE_: Base-3D-UNet.yaml
+### Config for training a prostate segmentation model from PET/CT images.
+
 AMP_ENABLED: true
 DATASET:
   CLASS_LABELS:
   - Background
+  - Inter
   - Bladder
   - Tumor
-  - Inter
   # - TURP urethra
   # - R seminal
   # - L seminal
   FOLD: 1
   PARAMS:
     crop_size:
-    - 196
-    - 196
+    - 170
+    - 170
     modality_roi_map:
     - CT:
-      - Inter
+      - Inter  # prostate annotated using the INTERpolation tool (MIM)
       # - R seminal
       # - L seminal
     - PT:
@@ -26,39 +27,33 @@ DATASET:
       - Tumor3
       # - TURP urethra
     num_slices: 100
-    slice_shape:
-    - 392
-    - 392
-  TEST_DATASET_PATH:
-  - data/image_dataset
-  TRAIN_DATASET_PATH:
-  - data/image_dataset
+    slice_shape:  # upscales PET to this shape
+    - 512
+    - 512
 EARLY_STOPPING:
-  MODE: min
-  MONITOR: val_loss
-  PATIENCE: 20
+  MODE: max
+  MONITOR: classwise_dice_score/Inter
+  PATIENCE: 10
 EVAL_ONLY: false
 LOSS:
-  FN: BCEDiceWithOverlapLoss
+  FN: BCEDiceLoss
   PARAMS:
-    bce_weight: 10.0
+    bce_weight: 1.0
     class_labels:
     - Background
     - Inter
     - Bladder
     - Tumor
+    # - TURP urethra
+    # - R seminal
+    # - L seminal
     class_weight:
-    - 1
-    - 20
-    - 20
-    - 20
-    class_weight_loss: both
+    - 0.01
+    - 0.89
+    - 0.1
+    - 0
     dice_weight: 1.0
     normalization: sigmoid
-    overlap_idx:
-    - 0
-    - 0
-    overlap_weight: 0
 MODEL:
   BACKBONE:
     NAME: UNet3D
@@ -67,12 +62,12 @@ MODEL:
   UNET:
     f_maps: 32
     final_sigmoid: true
-    in_channels: 2
-    out_channels: 4 # 7
-  WEIGHTS: ''
+    in_channels: 2   # 2 input channels: PET, CT
+    out_channels: 4  # 4 classes
 NUM_WORKERS: 6
 PRED_ONLY: false
 RESUME: false
+SEED: 99
 SOLVER:
   CHECKPOINT_PERIOD: 1000
   GAMMA: 0.1
@@ -82,9 +77,7 @@ SOLVER:
   OPTIM: Adam
   PARAMS:
     lr: 0.0001
-  STEPS:
-  - 500
-  - 700
+  STEPS: []
   WARMUP_FACTOR: 0.001
   WARMUP_ITERS: 0
   WARMUP_METHOD: linear
@@ -97,21 +90,19 @@ TEST:
   - ssim
   - hausdorff
   - classwise_dice_score
-  - argmax_dice_score
-  - overlap
   INFERENCE_FILE_NAME: inference.pk
-  THRESHOLDS: null
-  VIS_PREDS: false
+  THRESHOLDS:
+  - null
+  - 0.5
+  - 0.5
+  - 1  # zero out tumor
+  VIS_PREDS: true
 TRANSFORMS:
-  crop:
-  - 170
-  - 170
-  deform_points:
-  - 2
-  - 2
-  - 2
-  deform_sigma: 5
-  div_by_max: true
+  crop_size: null
+  deform_points: null
+  deform_sigma: null
+  min_max_norm: true
+  ignore_bg: false
   multi_scale: null
-  p_flip: 0.5
-# from /data/home/rodrigue/prostate-segmentation/seg_3d/output/multi-mod-3-new-data-split/1/config.yaml
+  p_flip: null
+seed: 99

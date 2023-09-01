@@ -5,15 +5,17 @@ import matplotlib.cm as cm
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union
 
-from utils import centre_crop, dice_score
+from seg_3d.evaluation.metrics import dice_score
+from seg_3d.utils.misc_utils import centre_crop
 
 
 # define mapping of roi to cmap
 # all sequential cmaps here https://matplotlib.org/stable/tutorials/colors/colormaps.html#sequential
 # this dict also specifies the order in which rois are plotted e.g. Inter is plotted first, then Bladder
-cmap_roi_map = OrderedDict({
+CMAP_ROI_MAP = OrderedDict({
+    "Prostate": "Greens",
     "Inter": "Greens",
     "Bladder": "Reds",
     "Tumor": "Purples",
@@ -34,16 +36,16 @@ class MaskVisualizer:
             class_labels: list of names of the plotted region of interests
             algos: list of the algorithm names that will generate mask predictions
             crop_size: size of the center crop when plotting the masks
+            root_plot_dir: root directory where plots are stored
             fig_grid: number of rows and columns for the figure grid
             fig_size: dimensions of the figure
-            root_plot_dir: root directory where plots are stored
             save_figs: option to save figures to disk or show them with plt.show()
         """
         if algos is None:
             algos = [""]
         self.algos = algos
         self.class_labels = class_labels
-        assert len(set(self.class_labels) - set(cmap_roi_map.keys())) == 0,\
+        assert len(set(self.class_labels) - set(CMAP_ROI_MAP.keys())) == 0,\
             "a mapping from class to color map needs to be defined for all class labels"
         self.crop_size = crop_size
         self.root_plot_dir = root_plot_dir
@@ -53,13 +55,13 @@ class MaskVisualizer:
 
         # configure color maps
         self.sample_cmap = "inferno"
-        self.pred_cmap_dict = OrderedDict({label: cmap_roi_map[label] for label in class_labels})
-        self.plot_ordering = {label: idx for idx, label in enumerate(cmap_roi_map) if label in self.pred_cmap_dict}
+        self.pred_cmap_dict = OrderedDict({label: CMAP_ROI_MAP[label] for label in class_labels})
+        self.plot_ordering = {label: idx for idx, label in enumerate(CMAP_ROI_MAP) if label in self.pred_cmap_dict}
 
     def plot_mask_predictions(
-            self, patient: str, sample: np.ndarray, pred_dict: Dict[str, np.ndarray] or np.ndarray,
+            self, patient: str, sample: np.ndarray, pred_dict: Union[Dict[str, np.ndarray], np.ndarray],
             gt: np.ndarray, gt_overlay: bool = False, skip_bkg: bool = True, show_slice_scores: bool = True,
-            plane: str = None,
+            plane: str = None
     ) -> None:
         """
         Generates a plot showing original sample, ground truth and prediction masks for each slice
@@ -67,12 +69,13 @@ class MaskVisualizer:
         Args:
             patient: name of the patient
             sample: raw sample of shape (D, H, W) or (C, D, H, W), channel here are the different modalities
-            gt: ground truth mask of shape (C, D, H, W), channel here are the different classes
-            pred_dict: predicted masks for each alg where keys are alg names and items are preds of shape (C, D, H, W)
+            pred_dict: predicted masks for each alg where keys are alg names and items are preds of same shape as gt
+            gt: ground truth mask of shape (D, H, W) or (C, D, H, W), channel here are the different classes
             gt_overlay: option to overlay the ground truth mask with the prediction
-            skip_bkg: option to skip the first channel in gt and pred_dict which is the background channel
+            skip_bkg: if the first channel is background in gt and pred_dict then skip it
             show_slice_scores: option to show dice score and pixel sum for each slice
             plane: the anatomical plane in which to do slicing, options are 'tra' (default), 'sag' or 'cor'
+                for transverse, sagittal, and coronal planes respectively
         """
         # handle case where only have 1 set of predictions
         if not isinstance(pred_dict, dict) and len(self.algos) == 1 and isinstance(pred_dict, np.ndarray):
@@ -150,8 +153,8 @@ class MaskVisualizer:
                 im = axs[a, b].imshow(centre_crop(X[i], self.crop_size), cmap=self.sample_cmap)
                 cb = plt.colorbar(im, ax=axs[a, b], shrink=0.7)
                 axs[a, b].set_title("Sample")
-                axs[a, b].set_xlabel("x")
-                axs[a, b].set_ylabel("y")
+                # axs[a, b].set_xticks([])
+                # axs[a, b].set_yticks([])
 
             # get 2d indices for ground truth mask
             a, b = int(len(sample) / axs.shape[1]), int(len(sample) % axs.shape[1])
@@ -172,8 +175,8 @@ class MaskVisualizer:
                     # are a shade different than the mask predictions
                     gt_im[:, :, :3] = cm.get_cmap(self.pred_cmap_dict[label])(y * 0.5)[:, :, :3]
 
-                    # add sum to legend if specified
-                    leg_label = label + ": {:.0f}".format(y.sum()) if show_slice_scores else label
+                    # add pixel sum to legend if specified
+                    leg_label = label + ": sum={:.0f}".format(y.sum()) if show_slice_scores else label
 
                     # add patch for legend
                     gt_patches.append(
@@ -186,6 +189,8 @@ class MaskVisualizer:
 
             # add title and legend
             axs[a, b].set_title("Ground Truth Mask")
+            # axs[a, b].set_xticks([])
+            # axs[a, b].set_yticks([])
             axs[a, b].legend(handles=gt_patches, loc=1)  # loc=1 for upper right
 
             pred_patches = []  # for legend
@@ -223,10 +228,10 @@ class MaskVisualizer:
                         pred_im[:, :, 3] = y_hat
                         pred_im[:, :, :3] = cm.get_cmap(self.pred_cmap_dict[label])(y_hat)[:, :, :3]
 
-                        # add dice and sum to legend if specified
+                        # add dice and pixel sum to legend if specified
                         if show_slice_scores:
-                            leg_label = label + ": {:.0f}, {:.4f}".format(
-                                np.ceil(y_hat[y_hat > 0.5]).sum(), dice_score(y, y_hat)
+                            leg_label = label + ": sum={:.0f}, dice={:.2f}".format(
+                                np.ceil(y_hat[y_hat > 0.5]).sum(), dice_score(pred=y_hat, gt=y)
                             )
                         else:
                             leg_label = label
@@ -282,3 +287,7 @@ class MaskVisualizer:
         # make sure fig size is specified
         if not self.fig_size:
             self.fig_size = (self.fig_grid[1] * 4, self.fig_grid[0] * 4)
+
+
+# TODO: add option for just inference, i.e. no ground truth
+# TODO: add option for just ground truth, i.e. no predictions

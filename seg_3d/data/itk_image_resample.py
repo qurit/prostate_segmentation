@@ -4,14 +4,23 @@ import SimpleITK as sitk
 import numpy as np
 
 __all__ = [
-    "read_scan_as_sitk_image",
-    "downsample_image",
-    "combine_pet_ct_image",
-    "convert_image_to_npy",
-    "resample_image",
-    "mask_to_sitk_image",
-    "clamp_image_values"
+    'print_image_info',
+    'read_scan_as_sitk_image',
+    'downsample_image',
+    'combine_pet_ct_image',
+    'convert_image_to_npy',
+    'resample_image',
+    'mask_to_sitk_image',
+    'clamp_image_values'
 ]
+
+
+def print_image_info(image: sitk.Image, name=''):
+    print('information', name)
+    print('\timage size: {0}'.format(image.GetSize()))
+    print('\timage spacing: {0}'.format(image.GetSpacing()))
+    print('\tpixel type: ' + image.GetPixelIDTypeAsString())
+    print('\tnumber of channels: ' + str(image.GetNumberOfComponentsPerPixel()))
 
 
 def read_scan_as_sitk_image(dcm_dir: str) -> sitk.Image:
@@ -22,6 +31,10 @@ def read_scan_as_sitk_image(dcm_dir: str) -> sitk.Image:
     # get all the .dcm files from directory
     series_file_names = sitk.ImageSeriesReader.GetGDCMSeriesFileNames(dcm_dir, series_IDs[0])
     series_reader.SetFileNames(series_file_names)
+
+    # print dicom metadata
+    # import pydicom
+    # print(pydicom.filereader.dcmread(series_file_names[0]))
 
     # return scan
     return series_reader.Execute()
@@ -71,12 +84,8 @@ def combine_pet_ct_image(pet_image: sitk.Image, ct_image: sitk.Image, verbose=Fa
     pet_ct_combined = sitk.Compose(pet_image_resampled, sitk.Cast(ct_image, pet_image_resampled.GetPixelID()))
 
     if verbose:
-        for image, image_name in zip([pet_image, ct_image, pet_ct_combined], ["PET", "CT", "Combined PET-CT"]):
-            print("{} information".format(image_name))
-            print('\timage size: {0}'.format(image.GetSize()))
-            print('\timage spacing: {0}'.format(image.GetSpacing()))
-            print('\tpixel type: ' + image.GetPixelIDTypeAsString())
-            print('\tnumber of channels: ' + str(image.GetNumberOfComponentsPerPixel()))
+        for image, image_name in zip([pet_image, ct_image, pet_ct_combined], ['PET', 'CT', 'Combined PET-CT']):
+            print_image_info(image, image_name)
 
     return pet_ct_combined
 

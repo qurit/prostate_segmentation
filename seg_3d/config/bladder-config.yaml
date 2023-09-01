@@ -1,0 +1,116 @@
+### Config for training a bladder segmentation model from PET images.
+### Uses the 3D UNet architecture and a loss to explicitly 
+### penalize overlap between bladder predictions and ground truth tumor
+
+AMP_ENABLED: false  # disable Automatic Mixed Precision (AMP) training
+EVAL_ONLY: false  # if true, then only run evaluation script which generates predictions and computes metrics
+PRED_ONLY: false # if true, then only run inference and save out predictions
+
+DATASET:
+  TRAIN_PATIENT_KEYS: null  # train set
+  VAL_PATIENT_KEYS: null  # validation set - evaluation steps during training use these patients
+  TEST_PATIENT_KEYS: null # test set - EVAL_ONLY and PRED_ONLY modes uses these patients
+  FOLD: 1  # fold index for K-Fold cross-validation 
+  # will populate the TRAIN/VAL/TEST_PATIENT_KEYS parameters if they are set to null
+  CLASS_LABELS:  # model will output prediction for background, bladder, tumor
+  - Background
+  - Bladder
+  - Tumor
+  PARAMS:
+    crop_size:  # crop axial slices
+    - 140
+    - 140
+    modality_roi_map:
+    - PT:  # only train with PET as input
+      - Bladder
+      - Tumor  # patients can have up to 3 lesions
+      - Tumor2
+      - Tumor3
+    num_slices: 128  # keep only the last 128 axial slices
+
+EARLY_STOPPING:
+  MODE: min  # mode options are 'min' or 'max' depending on the metric being monitored for early stopping
+  MONITOR: val_loss  # choose best model based on best validation loss
+  PATIENCE: 10  # if no improvement after 10 eval steps, then end training
+
+LOSS:
+  FN: BCEDiceOverlapLoss  # loss = BCE() + Dice() + Overlap()
+  # overlap loss penalizes voxels predicted as bladder but are labeled tumor
+  PARAMS:
+    bce_weight: 1.0  # multiply bce loss with bce_weight
+    class_labels:  # useful for logging
+    # order in prediction mask
+    - Background
+    - Bladder
+    - Tumor
+    class_weight:  # multiply loss with class_weight for the individual classes
+    - 0  # ignore background
+    - 1
+    - 0  # ignore tumor
+    dice_weight: 1.0  # multiply dice loss with dice_weight
+    normalization: sigmoid  # options are 'sigmoid' or 'softmax'
+    overlap_idx:
+    - 1  # index in prediction mask for bladder
+    - 2  # index in prediction mask for tumor
+    overlap_weight: 1.0  # multiply overlap loss with overlap_weight
+
+MODEL:
+  BACKBONE:
+    NAME: UNet3D  # 3D UNet architecture
+  DEVICE: cuda
+  META_ARCHITECTURE: SemanticSegNet
+  UNET:
+    f_maps: 32  # size of the model, change to 16 or 8 for smaller model
+    final_sigmoid: true
+    in_channels: 1  # only 1 channel since just PET
+    out_channels: 3  # 3 channels since classes are background, bladder, tumor
+  WEIGHTS: 
+NUM_WORKERS: 6  # multiple workers for loading data, significantly boosts training time
+
+SOLVER:
+  CHECKPOINT_PERIOD: 1000  # save a checkpoint after every this number of iterations
+  IMS_PER_BATCH: 2  # number of samples per batch
+  MAX_ITER: 10000  # maximum number of iterations
+  OPTIM: Adam  # optimizer from pytorch
+  PARAMS:
+    lr: 0.0005  # base learning rate
+  STEPS:
+  - 300  # decreases the learning rate at this iteration number
+  - 700
+  WARMUP_FACTOR: 0.001  # warm up learning rate at beginning of training
+  WARMUP_ITERS: 100  # number of iterations to increase lr to base lr
+
+TEST:
+  EVAL_METRICS:  # metrics to track during evaluation steps
+  - classwise_dice_score
+  - argmax_dice_score
+  - overlap
+  EVAL_PERIOD: 20  # number of training steps between each evaluation step
+  FINAL_EVAL_METRICS:  # metrics to compute at the end of training
+  - ssim
+  - hausdorff
+  - classwise_dice_score
+  - overlap_no_argmax
+  INFERENCE_FILE_NAME: inference.pk  # name of the file that stores predictions
+  THRESHOLDS:  # do thresholding of predictions at end of training
+  - null  # ignore background predictions
+  - 0.5   # only do thresholding for bladder
+  - 1  # zero out tumor predictions
+  VIS_PREDS: true  # generate figures for the predictions
+
+TRANSFORMS:  # data augmentations
+  crop_size:  # random crop, passed in image size is DATASET.PARAMS.crop_size
+  # no bladder annotations are cropped out with this crop size
+  - 128
+  - 128
+  deform_sigma: null  # disable elastic deformations
+  min_max_norm: true
+  multi_scale: null  # disable multi scaling augmentation
+  p_flip: null  # disable random horizontal flip
+seed: 99  # ensures some determinism
+tags:  # useful for sorting runs in omniboard
+- Bladder
+- Tumor
+- PT
+### parameters missing here will be set by defaults.py
+### more documentation for parameters are in defaults.py

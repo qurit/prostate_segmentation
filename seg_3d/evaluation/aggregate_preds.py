@@ -21,7 +21,7 @@ def main(metrics, thresholds, load_inference_fp, _run):
     name = _run.experiment_info['name']
     root_dir = os.path.join('seg_3d/output', name)
     add_fh(logger, output=root_dir)
-    logger.info("Starting evaluation on KFold run...")
+    logger.info('Starting evaluation on KFold run...')
 
     inference_dict = {}
     results = []
@@ -35,8 +35,8 @@ def main(metrics, thresholds, load_inference_fp, _run):
         fold_config = yaml.safe_load(open(os.path.join(run_dir, 'config.yaml'), 'r'))
         class_labels = fold_config['DATASET']['CLASS_LABELS']
 
-        with open(os.path.join(run_dir, load_inference_fp), "rb") as f:
-            curr_inference = pickle.load(f, encoding="bytes")
+        with open(os.path.join(run_dir, load_inference_fp), 'rb') as f:
+            curr_inference = pickle.load(f, encoding='bytes')
             # os.remove(os.path.join(run_dir, 'inference.pk'))
 
         if metric_list is None:
@@ -62,13 +62,13 @@ def main(metrics, thresholds, load_inference_fp, _run):
             logger.info('results for patient {}:'.format(patient))
             patient_metrics = metric_list.get_results_idx(idx)
             for key in patient_metrics:
-                logger.info("{}: {}".format(key, patient_metrics[key]))
+                logger.info('{}: {}'.format(key, patient_metrics[key]))
             patient_metrics['patient'] = patient
 
             # convert lists to separate key, value pair
             new_entries = {}
             for key, val in patient_metrics.items():
-                if len(list(val)) > 1 and type(val) is not str:
+                if len([val]) > 1 and type(val) is not str:
                     patient_metrics[key] = list(val)
                     for jdx, item in enumerate(val):
                         new_entries[key + '/{}'.format(class_labels[jdx])] = item
@@ -98,8 +98,8 @@ def main(metrics, thresholds, load_inference_fp, _run):
     logger.info(json.dumps(stats, indent=4))
 
     # save inference results
-    # with open(os.path.join(root_dir, 'inference.pk'), 'wb') as f:
-    #     pickle.dump(inference_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(os.path.join(root_dir, 'inference.pk'), 'wb') as f:
+        pickle.dump(inference_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # save to a .txt file
     with open(os.path.join(root_dir, 'kfold_stats.txt'), 'w') as f:
@@ -119,7 +119,7 @@ def main(metrics, thresholds, load_inference_fp, _run):
 def config():
     metrics = [
         'classwise_dice_score',
-        'argmax_dice_score'
+        'hausdorff'
     ]
     thresholds = None
     tags = ['kfold_eval']
@@ -127,12 +127,16 @@ def config():
 
 
 if __name__ == '__main__':
+    """
+    Aggregates predictions and results across all the kfold runs.
+    Logs results to a sacred experiment instance.
+    """
     logger = setup_logger(name=seg_3d.evaluation.__name__)
 
     # mongo observer
     ex.observers.append(
         MongoObserver(url=f'mongodb://'
-                          'sample:password'
+                          'sample:password'  # these are set inside .env
                           f'@localhost:27017/?authMechanism=SCRAM-SHA-1', db_name='db')
     )  # assumes mongo db is running
     ex.logger = logger

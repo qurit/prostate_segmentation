@@ -1,4 +1,4 @@
-import os
+import operator
 import random
 from typing import Optional, Tuple
 
@@ -10,6 +10,15 @@ from torch.utils.data import Sampler
 from scipy.ndimage import distance_transform_edt as eucl_distance
 
 
+def centre_crop(img, bounding):
+    if bounding is None:
+        return img
+    start = tuple(map(lambda a, da: a//2-da//2, img.shape, bounding))
+    end = tuple(map(operator.add, start, bounding))
+    slices = tuple(map(slice, start, end))
+    return img[slices]
+
+
 def seed_all(seed):
     np.random.seed(seed)
     random.seed(seed)
@@ -17,19 +26,6 @@ def seed_all(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = True  # set to True if inputs are the same size during training
     torch.backends.cudnn.deterministic = True  # may result in a slowdown if set to True
-
-
-def plot_loss(path, storage):
-    plt.figure()
-    train_loss = np.asarray(storage.history("training_loss").values())
-    val_loss = np.asarray(storage.history("val_loss").values())
-    plt.plot(train_loss[:, 1], train_loss[:, 0], label="Training")
-    plt.plot(val_loss[:, 1], val_loss[:, 0], label="Validation")
-    plt.xlabel("Iteration #")
-    plt.ylabel("Loss")
-    plt.legend()
-    plt.title("Model loss")
-    plt.savefig(path)
 
 
 def number_of_features_per_level(init_channel_number, num_levels):

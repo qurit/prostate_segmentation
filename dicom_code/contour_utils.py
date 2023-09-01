@@ -1,22 +1,21 @@
 """Original code taken from https://github.com/KeremTurgutlu/dicom-contour"""
 import os
-import cv2
-import scipy
-import pydicom as dicom
-import numpy as np
-import matplotlib.pyplot as plt
 
-from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
+import scipy
+import numpy as np
+from scipy import ndimage
+import matplotlib.pyplot as plt
+import pydicom as dicom
+from pydicom.pixel_data_handlers.util import apply_modality_lut
 
 
 def get_smallest_dcm(path, ext='.dcm'):
     """
     Get smallest dcm file in size given path of target dir
-    Inputs:
+
+    Args:
         path (str): path of the the directory that has DICOM files in it
         ext (str): extension of the DICOM files are defined with
-     Return:
-
     """
     fsize_dict = {f: os.path.getsize(path + f) for f in os.listdir(path)}
     for fname, size in [(k, fsize_dict[k]) for k in sorted(fsize_dict, key=fsize_dict.get, reverse=False)]:
@@ -28,10 +27,12 @@ def get_roi_names(contour_data):
     """
     This function will return the names of different contour data,
     e.g. different contours from different experts and returns the name of each.
-    Inputs:
+
+    Args:
         contour_data (dicom.dataset.FileDataset): contour dataset, read by dicom.read_file
+
     Returns:
-        roi_seq_names (list): names of the
+        roi_seq_names (list)
     """
     roi_seq_names = [roi_seq.ROIName for roi_seq in list(contour_data.StructureSetROISequence)]
     return roi_seq_names
@@ -54,7 +55,7 @@ def coords2poly(contour_dataset, path):
     Given a contour dataset (a DICOM class) and path that has .dcm files of
     corresponding images return polygon coordinates for the contours.
 
-    Inputs
+    Args:
         contour_dataset (dicom.dataset.Dataset) : DICOM dataset class that is identified as
                          (3006, 0016)  Contour Image Sequence
         path (str): path of directory containing DICOM images
@@ -64,7 +65,6 @@ def coords2poly(contour_dataset, path):
         img_ID (id): DICOM image id which maps input contour dataset
         img_shape (tuple): DICOM image shape - height, width
     """
-
     contour_coord = contour_dataset.ContourData
     # x, y, z coordinates of the contour in mm
     coord = []
@@ -97,18 +97,48 @@ def poly2contour(contour_data, shape):
         rows.append(i)
         cols.append(j)
     contour_arr = scipy.sparse.csc_matrix((np.ones_like(rows), (rows, cols)), dtype=np.int8,
-                             shape=(shape[0], shape[1])).toarray()
+                                          shape=(shape[0], shape[1])).toarray()
     return contour_arr
+
+
+def contour2mask(contours, size, xy_ordering=True):
+    """
+    Converts contour data to a binary mask.
+    Binary masks are easier to work with when it comes to
+    learning segmentation models but are resource intensive
+    
+    Args:
+    contours (list): contour data where each contour is a list of shape Nx2
+    size (Tuple): size of the original image
+
+    Return:
+        mask (np.ndarray): binary mask
+    """
+    mask = np.zeros(size, int)
+    if len(contours) == 0:
+        # handle case for empty contours, return empty mask in that case
+        return mask
+
+    poly_set = [np.asarray(poly) for poly in contours]
+    for poly in poly_set:
+        if xy_ordering:
+            # case for polygon coordinates being (x,y)
+            mask[poly[:, 1], poly[:, 0]] = 1
+        else:
+            # case for polygon coordinates being (row, column)
+            mask[poly[:, 0], poly[:, 1]] = 1
+    mask = ndimage.morphology.binary_fill_holes(mask)
+    return mask
 
 
 def plot2dcontour(img_arr, contour_arr, figsize=(20, 20)):
     """
-    Shows 2d MR img with contour
-    Inputs
+    Shows 2d img with contour
+
+    Args:
         img_arr: 2d np.array image array with pixel intensities
         contour_arr: 2d np.array contour array with pixels of 1 and 0
     """
-
     masked_contour_arr = np.ma.masked_where(contour_arr == 0, contour_arr)
     plt.figure(figsize=figsize)
     plt.subplot(1, 2, 1)

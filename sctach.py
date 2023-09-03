@@ -1,4 +1,4 @@
-    import torch
+import torch
 from seg_3d.data import dataset
 from torch.utils.data import DataLoader
 import sys

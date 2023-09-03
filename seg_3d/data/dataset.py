@@ -360,6 +360,185 @@ class ImageToImage3D(Dataset):
 
         return mask
 
+class ImageToImage3DInference(Dataset):
+
+    def __init__(self, dataset_path: str, modality_roi_map: List[dict], class_labels: List[str],
+                 num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None, clamp_ct: Tuple[int] = (-150, 150),
+                 joint_transform: Callable = None, patient_keys: List[str] or List[int] = None, num_patients: int = None):
+        # convert to a simple dict
+        self.dataset_path = dataset_path
+        self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
+        self.modality = list(self.modality_roi_map.keys())
+        # useful inverse mapping which maps roi to modality
+        self.roi_modality_map = {roi: m for m, r in self.modality_roi_map.items() for roi in r}
+        self.class_labels = class_labels  # specifies the ordering of the channels (rois) in the mask tensor
+        assert len(class_labels) > 0
+        self.num_slices = num_slices
+        self.slice_shape = slice_shape
+        self.crop_size = crop_size
+        self.clamp_ct = clamp_ct
+        self.num_patients = num_patients  # can be used for train-val-test split
+        self.logger = logging.getLogger(__name__)
+
+        if self.slice_shape is None and len(self.modality) > 1:
+            self.logger.warning('Doing multi channel but "slice_shape" is set to None! '
+                                'Use "slice_shape" to specify a common resolution across modalities')
+
+        if joint_transform is None:
+            joint_transform = JointTransform3D(crop_size=None, p_flip=0, deform_sigma=None, min_max_norm=False)
+        self.joint_transform = joint_transform
+
+        self.scan_keys = os.listdir(self.dataset_path)
+
+    def __len__(self) -> int:
+            return len(self.scan_keys)
+
+    def __getitem__(self, idx) -> dict:
+        scan = self.scan_keys[idx]
+        scan_dir = os.path.join(self.dataset_path, scan)
+
+        for modality in self.modalities:
+            scan_dir = os.path.join(patient_dir, modality)
+            assert os.path.exists
+
+        # read image
+        image_dict = {
+            modality: read_scan_as_sitk_image(patient_dir[modality]) for modality in self.modality
+        }
+
+        # get the raw image size for each modality
+        raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modality}
+
+        # preprocessing of CT
+        if 'CT' in self.modality and bool(self.clamp_ct):
+            image_dict['CT'] = clamp_image_values(image=image_dict['CT'], lower_bound=self.clamp_ct[0], upper_bound=self.clamp_ct[1])
+
+        # preprocessing of PET
+        if 'PT' in self.modality:
+            pass
+
+        # read mask data from dataset and return mask dict
+        mask_dict_npy = self.get_mask(patient, raw_image_size_dict)
+
+        # perform resampling if multi channel/modality is specified
+        if {*self.modality} == {'PT', 'CT'} and self.slice_shape is not None:
+            reference_size = [*self.slice_shape,
+                              raw_image_size_dict['CT'][0]]  # assumes PET and CT have same image spacing in z direction
+            image = combine_pet_ct_image(pet_image=image_dict['PT'],
+                                         ct_image=downsample_image(image_dict['CT'], reference_size), verbose=False)
+
+            mask_dict = {
+                roi: mask_to_sitk_image(mask_dict_npy[roi], image_dict[self.roi_modality_map[roi]])
+                for roi in mask_dict_npy
+            }
+
+            for roi in mask_dict:
+                mask_dict[roi] = resample_image(mask_dict[roi], reference_image=image)
+                # convert to npy
+                mask_dict_npy[roi] = convert_image_to_npy(mask_dict[roi])
+
+            # convert image to npy and set channels as first dimension
+            image = np.moveaxis(
+                convert_image_to_npy(image), source=-1, destination=0
+            )
+
+        else:
+            # convert to npy and keep specified slices
+            image_dict_npy = {
+                modality: convert_image_to_npy(image_dict[modality]) for modality in self.modality
+            }
+            # generate a single ndarray
+            image = np.asarray([*image_dict_npy.values()])
+
+        # generate a single ndarray
+        mask = np.asarray([*mask_dict_npy.values()])
+
+        # need to have same tensor shape across samples in batch
+        image, mask = image[:, :self.num_slices], mask[:, :self.num_slices]
+
+        # keep copy of image before further image preprocessing
+        orig_image = np.copy(image)
+
+        if self.crop_size is not None:
+            image = centre_crop(image, (*image.shape[:2], *self.crop_size))
+            mask = centre_crop(mask, (*mask.shape[:2], *self.crop_size))
+
+        # apply transforms and convert to tensors
+        image, mask = self.joint_transform(image, mask)
+
+        # compute distance map for boundary loss
+        dist_map = one_hot2dist(np.asarray(mask), (1, 1, 1))
+
+        return {
+            'orig_image': orig_image,
+            'image': image.float(),
+            'gt_mask': mask.float(),
+            'dist_map': dist_map,  # used for boundary loss
+            'patient': patient  # patient id
+        }
+
+    def get_mask(self, patient: str, image_size_dict: Dict[str, Tuple]) -> dict:
+        # get all rois from the dataset
+        patient_rois = {
+            modality: list(self.dataset_dict[patient][modality]['rois'].keys()) for modality in self.modality
+        }
+
+        # get specified roi data from dataset
+        roi_data = {}
+        for roi_name, modality in self.roi_modality_map.items():
+            # check to see if specified rois exist in dataset
+            if roi_name in patient_rois[modality]:
+                roi_data[(roi_name, modality)] = self.dataset_dict[patient][modality]['rois'][roi_name]
+            else:
+                # add empty mask if specified roi does not exist in dataset
+                # self.logger.warning('Roi "{}" does not exist in dataset for patient "{}"! Adding empty mask...'
+                #                    .format(roi_name, patient))
+                # creates an empty list of contours for each frame
+                roi_data[(roi_name, modality)] = [[] for _ in range(image_size_dict[modality][0])]
+
+        # build mask object for each roi
+        mask = {
+            roi_name: np.asarray(
+                [contour2mask(roi_data[(roi_name, modality)][frame], image_size_dict[modality][1:])
+                 for frame in range(image_size_dict[modality][0])]
+            ) for roi_name, modality in roi_data
+        }
+
+        if 'Tumor' in self.roi_modality_map:
+            # call helper function to process tumor mask
+            mask = self.process_tumor_mask(mask)
+        else:
+            # add logic here for other combinations of rois
+            pass
+
+        # return properly ordered mask based on class labels (while ignoring background)
+        return OrderedDict({
+            roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != 'Background'
+        })
+
+    def process_tumor_mask(self, mask: Dict[str, np.ndarray]) -> None:
+        """
+        Merges all the tumor masks into a single class called 'Tumor'
+        Some patients may have 'Tumor', 'Tumor2', and 'Tumor3'
+        """
+        tumor_keys = [x for x in mask if 'Tumor' in x]
+        tumor_mask = np.zeros_like(mask['Tumor'])
+
+        # merge Tumor rois into a single channel
+        for tum in tumor_keys:
+            tumor_mask += mask[tum]
+            if tum != 'Tumor':
+                del mask[tum]
+
+        tumor_mask[tumor_mask > 1] = 1
+
+        if 'Bladder' in self.roi_modality_map:
+            mask['Bladder'][tumor_mask == 1] = 0  # ensure there is no overlap in gt bladder mask
+
+        # update tumor mask in the mask dict
+        mask['Tumor'] = tumor_mask
+
+        return mask
 
 class Image3D(Dataset):
     """

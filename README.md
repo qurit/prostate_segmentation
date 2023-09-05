@@ -5,7 +5,7 @@ This repo trains and evaluates PyTorch models on DICOM data of PET/CT scans for 
 detection. Create an environment for the repo using pip or conda. For the required dataset structure, 
 see [dataset documentation](docs/dataset.md). For config file setup, see [experiment documentation](docs/experiments.md).
 <p align="center">
-<img width="384" height="384" src=docs/figures/pred_mask1.gif alt="Sample Results"/>
+<img width="512" height="512" src=docs/figures/pred_mask1.gif alt="Sample Results"/>
 </p>
 
 ## Usage

@@ -8,6 +8,94 @@ see [dataset documentation](docs/dataset.md). For config file setup, see [experi
 <img width="512" height="512" src=docs/figures/pred_mask1.gif alt="Sample Results"/>
 </p>
 
+As a first step for using this repo, we recommend re-training a model using one of the configs
+provided with the dataset. See below for how to set a config and train.
+
+## Usage
+- Specify the name for each experiment via command line with `--name=sample_name` or `-n sample_name`.
+An output directory containing all experiment files will be created with the experiment name.
+- Comments associated with an experiment can be added in the command line with `-c` followed by
+comment in single quotes.
+- Changes to parameters in the config can be changed on the fly via command line keyword `with` followed
+by the key value pair parameters, e.g. `with 'a=2.3' 'b="FooBar"' 'c=True'`. Note changing the parameter `CONFIG_FILE`
+which loads an existing configuration file needs to be done inside the `config()` function in `train_loop.py`, i.e.
+    ```python
+    @ex.config
+    def config():
+        cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
+        cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
+    ```
+
+### Train
+```shell
+python -m seg_3d.train_loop --name=test1
+```
+
+To resume training from a previously started run, run the following command keeping the same experiment name.
+```shell
+python -m seg_3d.train_loop --name=test1 with 'RESUME=True'
+```
+
+### Inference
+For inference, see 
+[this notebook](notebooks/run_saved_model.ipynb) on how to use the `InferenceDataset` class with a predefined config.
+
+### Evaluation
+In evaluation mode, use the same name as the training run and set the parameter `EVAL_ONLY` to true.
+This will create a new directory prefixed **eval** inside the training run and will use by default
+the file `model_best.pth` as the weight file.
+```shell
+python -m seg_3d.train_loop --name=test1 with 'EVAL_ONLY=True'
+```
+
+To generate plots of the mask predictions along with the samples and ground truth labels, set the following
+parameter in the config to true
+```yaml
+TEST:
+    VIS_PREDS: true
+```
+Another option is to run the mask visualizer in standalone using the script `visualize_preds.py`.
+Here you need to specify the path to the output directory and the class labels.
+```shell
+python -m seg_3d.evaluation.visualize_preds
+```
+
+We also use tensorboard to visualize the inputs and outputs of the model during train time. To bring up tensorboard
+dashboard run the following command, where **output-dir** is the path to the directory storing the training runs
+```shell
+tensorboard --logdir ouput-dir
+```
+
+### Scripts
+The [run_configs](scripts/run_configs.sh) script can be used to run multiple configs consecutively, 
+for training multiple models in sequence. The [run_kfold](scripts/run_kfold.sh) script can be used to run a config over all
+three folds of the dataset, with final evaluation reported over the combined test sets.
+
+## Sacred
+We use Sacred to help manage experiments and for command line interface. Sacred documentation can be found
+here https://sacred.readthedocs.io/en/stable/quickstart.html. Below are the core features we use from Sacred.
+
+### Sacred Setup
+1. Install docker https://docs.docker.com/get-docker/
+2. Bring up omniboard and mongo database run `sudo docker compose up` (or `docker-compose up`) from the repo root directory.
+3. Open http://localhost:9000/ in the browser. Port number is specified in the docker-compose.yml file
+    ```yaml
+        ports:
+          - 127.0.0.1:9000:9000
+    ```
+
+## Useful notes
+- To create a new image from a container's changes and then push to registry (note this step does not work
+to do a backup of mongo db).
+    ```shell
+    docker commit <container-id> myname/containername:version
+    docker push <image-id>
+    ```
+- The mongo docker image writes data into a [volume](https://docs.docker.com/storage/volumes/)
+- One way to do a backup of mongo db is via [mongodump](https://www.mongodb.com/docs/database-tools/mongodump/)
+and then copying the file over from the container
+- Omniboard docs https://github.com/vivekratnavel/omniboard/blob/master/docs/quick-start.md
+
 ## Repo Structure
 ```
 prostate-segmentation/
@@ -41,79 +129,3 @@ prostate-segmentation/
     ├── train_loop.py               # Main file for running pipeline
     └── utils                       # Early stopping, logging, scheduling, and other utils
 ```
-
-## Usage
-- Specify the name for each experiment via command line with `--name=sample_name` or `-n sample_name`.
-An output directory containing all experiment files will be created with the experiment name.
-- Comments associated with an experiment can be added in the command line with `-c` followed by
-comment in single quotes.
-- Changes to parameters in the config can be changed on the fly via command line keyword `with` followed
-by the key value pair parameters, e.g. `with 'a=2.3' 'b="FooBar"' 'c=True'`. Note changing the parameter `CONFIG_FILE`
-which loads an existing configuration file needs to be done inside the `config()` function in `train_loop.py`, i.e.
-    ```python
-    @ex.config
-    def config():
-        cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
-        cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
-    ```
-
-### Train
-```shell
-python -m seg_3d.train_loop --name=test1
-```
-
-To resume training from a previously started run, run the following command keeping the same experiment name.
-```shell
-python -m seg_3d.train_loop --name=test1 with 'RESUME=True'
-```
-
-### Evaluation
-In evaluation mode, use the same name as the training run and set the parameter `EVAL_ONLY` to true.
-This will create a new directory prefixed **eval** inside the training run and will use by default
-the file `model_best.pth` as the weight file.
-```shell
-python -m seg_3d.train_loop --name=test1 with 'EVAL_ONLY=True'
-```
-
-To generate plots of the mask predictions along with the samples and ground truth labels, set the following
-parameter in the config to true
-```yaml
-TEST:
-    VIS_PREDS: true
-```
-Another option is to run the mask visualizer in standalone using the script `visualize_preds.py`.
-Here you need to specify the path to the output directory and the class labels.
-```shell
-python -m seg_3d.evaluation.visualize_preds
-```
-
-We also use tensorboard to visualize the inputs and outputs of the model during train time. To bring up tensorboard
-dashboard run the following command, where **output-dir** is the path to the directory storing the training runs
-```shell
-tensorboard --logdir ouput-dir
-```
-
-## Sacred
-We use Sacred to help manage experiments and for command line interface. Sacred documentation can be found
-here https://sacred.readthedocs.io/en/stable/quickstart.html. Below are the core features we use from Sacred.
-
-### Sacred Setup
-1. Install docker https://docs.docker.com/get-docker/
-2. Bring up omniboard and mongo database run `sudo docker compose up` (or `docker-compose up`) from the repo root directory.
-3. Open http://localhost:9000/ in the browser. Port number is specified in the docker-compose.yml file
-    ```yaml
-        ports:
-          - 127.0.0.1:9000:9000
-    ```
-
-## Useful notes
-- To create a new image from a container's changes and then push to registry (note this step does not work
-to do a backup of mongo db).
-    ```shell
-    docker commit <container-id> myname/containername:version
-    docker push <image-id>
-    ```
-- The mongo docker image writes data into a [volume](https://docs.docker.com/storage/volumes/)
-- One way to do a backup of mongo db is via [mongodump](https://www.mongodb.com/docs/database-tools/mongodump/)
-and then copying the file over from the container
-- Omniboard docs https://github.com/vivekratnavel/omniboard/blob/master/docs/quick-start.md 

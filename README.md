@@ -5,8 +5,12 @@ This repo trains and evaluates PyTorch models on DICOM data of PET/CT scans for 
 detection. Create an environment for the repo using pip or conda. For the required dataset structure, 
 see [dataset documentation](docs/dataset.md). For config file setup, see [experiment documentation](docs/experiments.md).
 <p align="center">
-<img width="256" height="256" src=docs/figures/pred_mask1.gif alt="Sample Results"/>
+
+<img width="512" height="512" src=docs/figures/pred_mask1.gif alt="Sample Results"/>
 </p>
+
+As a first step for using this repo, we recommend re-training a model using one of the configs
+provided with the dataset. See below for how to set a config and train.
 
 ## Usage
 - Specify the name for each experiment via command line with `--name=sample_name` or `-n sample_name`.
@@ -32,6 +36,10 @@ To resume training from a previously started run, run the following command keep
 ```shell
 python -m seg_3d.train_loop --name=test1 with 'RESUME=True'
 ```
+
+### Inference
+For inference, see 
+[this notebook](notebooks/run_saved_model.ipynb) on how to use the `InferenceDataset` class with a predefined config.
 
 ### Evaluation
 In evaluation mode, use the same name as the training run and set the parameter `EVAL_ONLY` to true.
@@ -59,6 +67,12 @@ dashboard run the following command, where **output-dir** is the path to the dir
 tensorboard --logdir ouput-dir
 ```
 
+### Scripts
+The [run_configs](scripts/run_configs.sh) script can be used to run multiple configs consecutively, 
+for training multiple models in sequence. The [run_kfold](scripts/run_kfold.sh) script can be used to run a config over all
+three folds of the dataset, with final evaluation reported over the combined test sets.
+
+
 ## Sacred
 We use Sacred to help manage experiments and for command line interface. Sacred documentation can be found
 here https://sacred.readthedocs.io/en/stable/quickstart.html. Below are the core features we use from Sacred.
@@ -82,4 +96,38 @@ to do a backup of mongo db).
 - The mongo docker image writes data into a [volume](https://docs.docker.com/storage/volumes/)
 - One way to do a backup of mongo db is via [mongodump](https://www.mongodb.com/docs/database-tools/mongodump/)
 and then copying the file over from the container
-- Omniboard docs https://github.com/vivekratnavel/omniboard/blob/master/docs/quick-start.md 
+- Omniboard docs https://github.com/vivekratnavel/omniboard/blob/master/docs/quick-start.md
+
+## Repo Structure
+```
+prostate-segmentation/
+├── conda_env.yml                   # Conda experiment file
+├── dicom_code                      # DICOM-specific code
+│   ├── contour_utils.py
+│   ├── custom_dicontour.py
+│   ├── dataset_refactor.py
+│   └── __init__.py
+├── docker-compose.yml              # Sacred Docker compose file
+├── docs                            # Documentation
+│   ├── dataset.md
+│   ├── experiments.md
+│   └── figures
+├── __init__.py
+├── notebooks                       # Inference Notebook and required code
+│   ├── run_saved_model.ipynb
+│   └── unet_code
+├── README.md
+├── requirements.txt                # Python package requirements
+├── scripts                         # Scripts for automated runs
+│   ├── run_configs.sh
+│   └── run_kfold.sh
+└── seg_3d                          # Core pipeline code
+    ├── config                      # Default configs and config related code
+    ├── data                        # Dataset and data related code
+    ├── evaluation                  # Metrics and evaluation/visualization related code
+    ├── __init__.py
+    ├── losses.py                   # Loss function definitions
+    ├── modeling                    # Neural Network architecture related code
+    ├── train_loop.py               # Main file for running pipeline
+    └── utils                       # Early stopping, logging, scheduling, and other utils
+```

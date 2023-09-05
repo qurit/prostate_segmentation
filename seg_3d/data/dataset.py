@@ -1,4 +1,3 @@
-import glob
 import json
 import logging
 import os
@@ -25,13 +24,14 @@ ROOT_DATA_DIR = './data/'
 class JointTransform3D:
     """
     Performs augmentation on image and mask when called. Due to the randomness of augmentation transforms,
-    it is not enough to simply apply the same Transform from torchvision on the image and mask separetely.
+    it is not enough to simply apply the same Transform from torchvision on the image and mask separately.
     Doing this will result in messing up the ground truth mask. To circumvent this problem, this class can
     be used, which will take care of the problems above.
 
     Args:
         test: set to True if in test mode which disables some of the augmentations and randomness
-        crop_size: tuple describing the size of the random crop. If bool(crop_size) evaluates to False, no crop will be taken.
+        crop_size: tuple describing the size of the random crop. If bool(crop_size) evaluates to False, no crop will be
+        taken.
         p_flip: the probability of performing a random horizontal flip.
         deform_sigma: sigma parameter used for elastic deformation
         deform_points: points parameter used for elastic deformation
@@ -62,7 +62,7 @@ class JointTransform3D:
         # normalization
         # feature scaling https://en.wikipedia.org/wiki/Feature_scaling
         if self.min_max_norm:
-            image = np.asarray([(im - im.min()) / np.ptp(im) for im in image])  # dividing by max - min is bad if it equals 0...
+            image = np.asarray([(im - im.min()) / np.ptp(im) for im in image])  # handles division by zero
             assert (0 <= image.min() < image.max() <= 1), 'Input data is not [0,1] normalized!!'
 
         # get number of channels in image
@@ -111,7 +111,7 @@ class ImageToImage3D(Dataset):
 
     Usage:
         1. If used without the unet.model.Model wrapper, an instance of this object should be passed to
-           torch.utils.data.DataLoader. Iterating through this returns the tuple of image, mask and image
+           torch.utils.data.DataLoader. Iterating through it returns the tuple of image, mask and image
            filename.
         2. With unet.model.Model wrapper, an instance of this object should be passed as train or validation
            datasets.
@@ -140,16 +140,15 @@ class ImageToImage3D(Dataset):
         clamp_ct: tuple describing the lower and upper bounds for image clamping of CT scan
         joint_transform: an instance of JointTransform3D for data augmentations. If bool(joint_transform)
             evaluates to False, torchvision.transforms.ToTensor will be used on both image and mask.
-        modality: specifies modality of scan
-        rois: list of region of interests
         patient_keys: specifies patients to include either by index or patient ID, if patient_keys=None
             then all patients from dataset are loaded
         num_patients: specifies the number of patients to include, sampled randomly
     """
 
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
-                 num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None, clamp_ct: Tuple[int] = (-150, 150),
-                 joint_transform: Callable = None, patient_keys: List[str] or List[int] = None, num_patients: int = None):
+                 num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
+                 clamp_ct: Tuple[int] = (-150, 150), joint_transform: Callable = None,
+                 patient_keys: List[str] or List[int] = None, num_patients: int = None):
         # convert to a simple dict
         self.modality_roi_map = {list(item.keys())[0]: list(item.values())[0] for item in modality_roi_map}
         self.modality = list(self.modality_roi_map.keys())
@@ -215,7 +214,7 @@ class ImageToImage3D(Dataset):
                 return self[idx]
 
     def __len__(self) -> int:
-            return len(self.patient_keys)
+        return len(self.patient_keys)
 
     def __getitem__(self, idx) -> dict:
         patient = list(self.patient_keys)[idx]
@@ -231,7 +230,8 @@ class ImageToImage3D(Dataset):
 
         # preprocessing of CT
         if 'CT' in self.modality and bool(self.clamp_ct):
-            image_dict['CT'] = clamp_image_values(image=image_dict['CT'], lower_bound=self.clamp_ct[0], upper_bound=self.clamp_ct[1])
+            image_dict['CT'] = clamp_image_values(image=image_dict['CT'], lower_bound=self.clamp_ct[0],
+                                                  upper_bound=self.clamp_ct[1])
 
         # preprocessing of PET
         if 'PT' in self.modality:
@@ -336,7 +336,7 @@ class ImageToImage3D(Dataset):
             roi_name: mask[roi_name] for roi_name in self.class_labels if roi_name != 'Background'
         })
 
-    def process_tumor_mask(self, mask: Dict[str, np.ndarray]) -> None:
+    def process_tumor_mask(self, mask: Dict[str, np.ndarray]):
         """
         Merges all the tumor masks into a single class called 'Tumor'
         Some patients may have 'Tumor', 'Tumor2', and 'Tumor3'
@@ -361,43 +361,85 @@ class ImageToImage3D(Dataset):
         return mask
 
 
-class Image3D(Dataset):
-    """
-    Dataset class purely for inference
+class InferenceDataset(Dataset):
 
-    TODO: this is NOT implemented! Needs the preprocessing (e.g. resampling 
-    for multi modality, centre crop, etc.) of data minus label handling
+    def __init__(self, dataset_path: str, modalities: List[str], num_slices: int = None, crop_size: int = 192,
+                 clamp_ct: Tuple[int] = (-150, 150), min_max_norm: bool = True,
+                 combined_slice_dims: Tuple[int, int] = (192, 192)):
+        self.dataset_path = dataset_path
+        self.modalities = modalities
+        self.num_slices = num_slices
+        self.combined_slice_dims = combined_slice_dims
+        self.crop_size = crop_size
+        self.clamp_ct = clamp_ct
+        self.min_max_norm = min_max_norm
+        self.logger = logging.getLogger(__name__)
 
-    nice to haves:
-     - option to run inference on a particular patient specified by id
-     - returns prediction as a RTSTRUCT
-    """
+        if len(self.modalities) > 1:
+            assert self.combined_slice_dims is not None,\
+                ('Doing multi channel but "slice_shape" is set to None! Use "slice_shape" to specify a'
+                 ' common resolution across modalities')
 
-    def __init__(self, dataset_path: str or List[str], path_suffix: str = '', transform: Callable = None,
-                 **kwargs) -> None:
-        if type(dataset_path) is str:
-            self.dataset_path = [dataset_path]
-        else:
-            self.dataset_path = dataset_path
-
-        # get all the subdirectories containing scans
-        self.scan_fps = [
-            os.path.join(scan_path, path_suffix) for dp in self.dataset_path
-            for scan_path in glob.glob(os.path.join(dp, '/*/'))
-        ]
-
-        self.transform = transform or torch.Tensor
+        self.scan_keys = os.listdir(self.dataset_path)
 
     def __len__(self) -> int:
-        return len(self.scan_fps)
+        return len(self.scan_keys)
 
-    def __getitem__(self, idx):
-        scan = list(self.scan_fps)[idx]
+    def __getitem__(self, idx) -> dict:
+        scan_key = self.scan_keys[idx]
+        scan_dir = os.path.join(self.dataset_path, scan_key)
+
+        scans = {}
+        for modality in self.modalities:
+            scan_dicom_dir = os.path.join(scan_dir, modality)
+            assert os.path.exists(scan_dicom_dir), ('Modalities were specified that are not found as '
+                                                    'subdirectories in dataset!')
+            scans[modality] = scan_dicom_dir
 
         # read image
-        image = read_scan_as_sitk_image(scan)
+        image_dict = {modality: read_scan_as_sitk_image(scan_dicom_dir) for modality, scan_dicom_dir in scans.items()}
 
-        # convert to npy array
-        image = convert_image_to_npy(image)
+        # get the raw image size for each modality
+        raw_image_size_dict = {modality: image_dict[modality].GetSize()[::-1] for modality in self.modalities}
 
-        return self.transform(image)
+        # preprocessing of CT
+        if 'CT' in self.modalities and bool(self.clamp_ct):
+            image_dict['CT'] = clamp_image_values(image=image_dict['CT'], lower_bound=self.clamp_ct[0],
+                                                  upper_bound=self.clamp_ct[1])
+
+        # perform resampling if multi channel/modality is specified
+        if {*self.modalities} == {'PT', 'CT'} and self.combined_slice_dims is not None:
+            reference_size = [*self.combined_slice_dims,
+                              raw_image_size_dict['CT'][0]]  # assumes PET and CT have same image spacing in z direction
+            image = combine_pet_ct_image(pet_image=image_dict['PT'],
+                                         ct_image=downsample_image(image_dict['CT'], reference_size), verbose=False)
+
+            # convert image to npy and set channels as first dimension
+            image = np.moveaxis(convert_image_to_npy(image), source=-1, destination=0)
+
+        else:
+            # convert to npy and keep specified slices
+            image_dict_npy = {modality: convert_image_to_npy(image_dict[modality]) for modality in self.modalities}
+            # generate a single ndarray
+            image = np.asarray([*image_dict_npy.values()])
+
+        # need to have same tensor shape across samples in batch
+        image = image[:, :self.num_slices]
+
+        # keep copy of image before further image preprocessing
+        orig_image = np.copy(image)
+
+        if self.min_max_norm:
+            image = np.asarray(
+                [(im - im.min()) / np.ptp(im) for im in image])  # dividing by max - min is bad if it equals 0...
+            assert (0 <= image.min() < image.max() <= 1), 'Input data is not [0,1] normalized!!'
+
+        image = torch.Tensor(np.array(image))
+        if self.crop_size:
+            image = centre_crop(image, (*image.shape[:2], self.crop_size, self.crop_size))
+
+        return {
+            'orig_image': orig_image,
+            'image': image.float(),
+            'scan_key': scan_key  # Name of scan directory
+        }

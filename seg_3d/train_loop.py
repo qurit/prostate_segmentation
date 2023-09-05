@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 
 import seg_3d
 from seg_3d.config import get_cfg
-from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, Image3D
+from seg_3d.data.dataset import ImageToImage3D, JointTransform3D, InferenceDataset
 from seg_3d.evaluation.evaluator import Evaluator
 from seg_3d.evaluation.metrics import MetricList, get_metrics
 from seg_3d.losses import get_loss_criterion, get_optimizer
@@ -373,7 +373,7 @@ def main(_config, _run):
         Checkpointer(model, save_dir=cfg.OUTPUT_DIR).load(cfg.MODEL.WEIGHTS, checkpointables=["model"])
 
         # get dataset for inference
-        test_dataset = Image3D(dataset_path=cfg.DATASET.TEST_DATASET_PATH)
+        # test_dataset = InferenceDataset(dataset_path=cfg.DATASET.TEST_DATASET_PATH)
 
         # get predictions
 
@@ -388,8 +388,8 @@ def config():
 
     # ###########################################
     # option to load config file here
-    # cfg.CONFIG_FILE = "seg_3d/config/prostate-config.yaml"
-    # cfg.merge_from_file(cfg.CONFIG_FILE)
+    cfg.CONFIG_FILE = "seg_3d/config/multi-mod-high-inter-loss-weight.yaml"
+    cfg.merge_from_file(cfg.CONFIG_FILE)
 
     ## can add more config changes here ##
 

@@ -1,27 +1,27 @@
 # Prostate Lesion Segmentation
 
+## Overview
+This repo trains and evaluates PyTorch models on DICOM data of PET/CT scans for bladder, prostate, and tumor ROI 
+detection. Create an environment for the repo using pip or conda. For the required dataset structure, 
+see [dataset documentation](docs/dataset.md). For config file setup, see [experiment documentation](docs/experiments.md).
+<p align="center">
+<img width="256" height="256" src=docs/figures/pred_mask1.gif alt="Sample Results"/>
+</p>
+
 ## Usage
-We use Sacred to help manage experiments and for command line interface. Sacred documentation can be found
-here https://sacred.readthedocs.io/en/stable/quickstart.html. Below are the core features we use from Sacred.
 - Specify the name for each experiment via command line with `--name=sample_name` or `-n sample_name`.
 An output directory containing all experiment files will be created with the experiment name.
 - Comments associated with an experiment can be added in the command line with `-c` followed by
 comment in single quotes.
 - Changes to parameters in the config can be changed on the fly via command line keyword `with` followed
 by the key value pair parameters, e.g. `with 'a=2.3' 'b="FooBar"' 'c=True'`. Note changing the parameter `CONFIG_FILE`
-which loads an existing configuration file needs to be done inside the `config()` function, i.e.
+which loads an existing configuration file needs to be done inside the `config()` function in `train_loop.py`, i.e.
     ```python
     @ex.config
     def config():
         cfg.CONFIG_FILE = 'seg_3d/config/bladder-detection.yaml'
         cfg.merge_from_file(cfg.CONFIG_FILE)  # config file has to be loaded here!
     ```
-
-We also use tensorboard to visualize the inputs and outputs of the model during train time. To bring up tensorboard
-dashboard run the following command, where **output-dir** is the path to the directory storing the training runs
-```shell
-tensorboard --logdir ouput-dir
-```
 
 ### Train
 ```shell
@@ -53,13 +53,17 @@ Here you need to specify the path to the output directory and the class labels.
 python -m seg_3d.evaluation.visualize_preds
 ```
 
-### Inference
-Similar to above.
+We also use tensorboard to visualize the inputs and outputs of the model during train time. To bring up tensorboard
+dashboard run the following command, where **output-dir** is the path to the directory storing the training runs
 ```shell
-python -m seg_3d.train_loop --name=test1 with 'PRED_ONLY=True'
+tensorboard --logdir ouput-dir
 ```
 
-## Sacred setup
+## Sacred
+We use Sacred to help manage experiments and for command line interface. Sacred documentation can be found
+here https://sacred.readthedocs.io/en/stable/quickstart.html. Below are the core features we use from Sacred.
+
+### Sacred Setup
 1. Install docker https://docs.docker.com/get-docker/
 2. Bring up omniboard and mongo database run `sudo docker compose up` (or `docker-compose up`) from the repo root directory.
 3. Open http://localhost:9000/ in the browser. Port number is specified in the docker-compose.yml file
@@ -68,7 +72,7 @@ python -m seg_3d.train_loop --name=test1 with 'PRED_ONLY=True'
           - 127.0.0.1:9000:9000
     ```
 
-### Useful notes
+## Useful notes
 - To create a new image from a container's changes and then push to registry (note this step does not work
 to do a backup of mongo db).
     ```shell

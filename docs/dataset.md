@@ -9,7 +9,7 @@ The image below are maximum intensity projection (MIP) images for a sample patie
 ![](https://github.com/qurit/prostate_segmentation/blob/a539324d1eff217493e759efcb29e9307e52979c/docs/figures/mip.png)
 
 ## Dataset structure and contents
-The dataset is stored in **data/image_dataset** and was structured using the script [dicom_code/dataset_refactor.py](https://github.com/rytai-dev/prostate-segmentation/blob/seg-3d/dicom_code/dataset_refactor.py). Each patient has an associated subdirectory with two subdirectories **CT** and **PT** for the CT and PET scans respectively. Each of these subdirectories contain the raw dicom files for the axial slices of the scan ordered by the number in the dicom file name.
+The dataset is stored in **data/image_dataset** and was structured using the script [dicom_code/dataset_refactor.py](https://github.com/qurit/prostate_segmentation/blob/1db894b648816fd343518d2591b981a2a7b7de04/dicom_code/dataset_refactor.py). Each patient has an associated subdirectory with two subdirectories **CT** and **PT** for the CT and PET scans respectively. Each of these subdirectories contain the raw dicom files for the axial slices of the scan ordered by the number in the dicom file name.
 ```
 data/image_dataset/
 │

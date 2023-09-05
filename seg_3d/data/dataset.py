@@ -146,7 +146,7 @@ class ImageToImage3D(Dataset):
     """
 
     def __init__(self, dataset_path: str or List[str], modality_roi_map: List[dict], class_labels: List[str],
-                 num_slices: int = None, combined_slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
+                 num_slices: int = None, slice_shape: Tuple[int] = None, crop_size: Tuple[int] = None,
                  clamp_ct: Tuple[int] = (-150, 150), joint_transform: Callable = None,
                  patient_keys: List[str] or List[int] = None, num_patients: int = None):
         # convert to a simple dict
@@ -158,7 +158,7 @@ class ImageToImage3D(Dataset):
         assert len(class_labels) > 0
         self.patient_keys = patient_keys  # this can either be a list of strings for keys or list of ints for indices
         self.num_slices = num_slices
-        self.combined_slice_shape = combined_slice_shape
+        self.slice_shape = slice_shape
         self.crop_size = crop_size
         self.clamp_ct = clamp_ct
         self.num_patients = num_patients  # can be used for train-val-test split
@@ -363,9 +363,9 @@ class ImageToImage3D(Dataset):
 
 class InferenceDataset(Dataset):
 
-    def __init__(self, dataset_path: str, modalities: List[str], num_slices: int = None, crop_size: int = None,
+    def __init__(self, dataset_path: str, modalities: List[str], num_slices: int = None, crop_size: int = 192,
                  clamp_ct: Tuple[int] = (-150, 150), min_max_norm: bool = True,
-                 combined_slice_dims: Tuple[int, int] = None):
+                 combined_slice_dims: Tuple[int, int] = (192, 192)):
         self.dataset_path = dataset_path
         self.modalities = modalities
         self.num_slices = num_slices

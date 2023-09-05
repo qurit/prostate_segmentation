@@ -8,6 +8,40 @@ see [dataset documentation](docs/dataset.md). For config file setup, see [experi
 <img width="512" height="512" src=docs/figures/pred_mask1.gif alt="Sample Results"/>
 </p>
 
+## Repo Structure
+```
+prostate-segmentation/
+├── conda_env.yml # Conda experiment file
+├── dicom_code # DICOM-specific code
+│   ├── contour_utils.py
+│   ├── custom_dicontour.py
+│   ├── dataset_refactor.py
+│   └── __init__.py
+├── docker-compose.yml # Sacred Docker compose file
+├── docs # Documentation
+│   ├── dataset.md
+│   ├── experiments.md
+│   └── figures
+├── __init__.py
+├── notebooks # Inference Notebook and required code
+│   ├── run_saved_model.ipynb
+│   └── unet_code
+├── README.md
+├── requirements.txt # Python package requirements
+├── scripts # Scripts for automated runs of multiple configs or multiple folds
+│   ├── run_configs.sh
+│   └── run_kfold.sh
+└── seg_3d
+    ├── config # Default configs and config related code
+    ├── data # Dataset and data related code
+    ├── evaluation # Metrics and evaluation/visualization related code
+    ├── __init__.py
+    ├── losses.py # Loss function definitions
+    ├── modeling # Neural Network architecture related code
+    ├── train_loop.py # Main pipeline code
+    └── utils # Early stopping, logging, scheduling, and other utils
+```
+
 ## Usage
 - Specify the name for each experiment via command line with `--name=sample_name` or `-n sample_name`.
 An output directory containing all experiment files will be created with the experiment name.

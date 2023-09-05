@@ -6,8 +6,6 @@ services:
     image: mongo  # set to mongo for original image
     ports:
       - 127.0.0.1:27017:27017
-    volumes:  # by default associated files are mapped to docker/volumes
-      - /home/rodrigue/Shared/results_database/:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: $MONGO_INITDB_ROOT_USERNAME
       MONGO_INITDB_ROOT_PASSWORD: $MONGO_INITDB_ROOT_PASSWORD

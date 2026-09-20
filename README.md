@@ -131,3 +131,7 @@ prostate-segmentation/
     ├── train_loop.py               # Main file for running pipeline
     └── utils                       # Early stopping, logging, scheduling, and other utils
 ```
+## How to cite
+R. D. Schaetzen, Y. Farag, G. Chaussé, A. Rahmim, F. Yousefirizi, C. Uribe.  
+**[A fully automated method for prostate segmentation in PSMA PET/CT scans](https://jnm.snmjournals.org/content/64/supplement_1/P1193)**  
+*J. Nucl. Med.*, vol. 64 (suppl. 1): 1193, 2023.
